@@ -16,8 +16,6 @@
 */
 
 
-
-
 #ifndef LOGINCONTROLLER_H
 #define LOGINCONTROLLER_H
 
