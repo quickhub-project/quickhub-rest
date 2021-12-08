@@ -34,6 +34,8 @@ FileController::FileController(QObject *parent) : IResourceHttpController(false)
 
 void FileController::handleResourceOperation(QString token, IResourceHttpController::PathElements &pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
 {
+    Q_UNUSED(command)
+    Q_UNUSED(parameters)
     QString id = pathElements.id;
 
     _mutex.lock();

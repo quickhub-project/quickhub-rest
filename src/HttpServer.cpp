@@ -16,7 +16,7 @@
 */
 
 
-
+#include <QProcessEnvironment>
 #include "HttpServer.h"
 #include <QSettings>
 #include "httplistener.h"
@@ -50,8 +50,11 @@ HttpServer::HttpServer(QString storagePath, QObject *parent) : QObject(parent)
 
     QSettings fileSettings;
 
-    QString docrootPath = storagePath+"/httpServer/docroot";
-    qDebug()<<docrootPath;
+    QString docrootPath = QProcessEnvironment::systemEnvironment().value("HTTP_DOCROOT", "");
+    if(docrootPath.isEmpty())
+        QString docrootPath = storagePath+"/httpServer/docroot";
+
+    qDebug()<<"HTTP docroot is: "+docrootPath;
 
     QDir dir(docrootPath);
     if(!dir.exists())
