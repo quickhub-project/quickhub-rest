@@ -50,10 +50,7 @@ HttpServer::HttpServer(QString storagePath, QObject *parent) : QObject(parent)
 
     QSettings fileSettings;
 
-    QString docrootPath = QProcessEnvironment::systemEnvironment().value("HTTP_DOCROOT", "");
-    if(docrootPath.isEmpty())
-        QString docrootPath = storagePath+"/httpServer/docroot";
-
+    QString docrootPath = QProcessEnvironment::systemEnvironment().value("HTTP_DOCROOT", "/httpServer/docroot");
     qDebug()<<"HTTP docroot is: "+docrootPath;
 
     QDir dir(docrootPath);
@@ -61,7 +58,6 @@ HttpServer::HttpServer(QString storagePath, QObject *parent) : QObject(parent)
     {
         dir.mkpath(docrootPath);
     }
-
 
     QSettings* sessionSettings=new QSettings(configFile,QSettings::IniFormat, this);
     sessionSettings->beginGroup("sessions");
