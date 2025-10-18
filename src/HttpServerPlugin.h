@@ -32,6 +32,7 @@ public:
     HttpServerPlugin(QObject* parent = 0);
     virtual bool init(QVariantMap parameters);
     virtual bool shutdown();
+    Q_INVOKABLE virtual QSet<QString> requires() override { return QSet<QString>(); }
     virtual QString getPluginName();
 };
 
