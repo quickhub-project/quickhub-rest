@@ -27,7 +27,7 @@ HttpServerPlugin::HttpServerPlugin(QObject *parent) : IPlugin(parent)
 
 bool HttpServerPlugin::init(QVariantMap parameters)
 {
-    QString path =  parameters.value("f", QStandardPaths::standardLocations(QStandardPaths::DataLocation).at(0)+"/v1.3/").toString();
+    QString path =  parameters.value("f", QStandardPaths::standardLocations(QStandardPaths::AppLocalDataLocation).at(0)+"/v1.3/").toString();
     new HttpServer(path);
     return true;
 }
