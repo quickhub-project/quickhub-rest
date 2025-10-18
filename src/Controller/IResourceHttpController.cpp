@@ -112,7 +112,7 @@ void IResourceHttpController::service(HttpRequest &request, HttpResponse &respon
     }
     else
     {
-        QMapIterator<QByteArray,QByteArray> it(params);
+        QMultiMapIterator<QByteArray,QByteArray> it(params);
         while(it.hasNext())
         {
             it.next();
@@ -127,7 +127,7 @@ void IResourceHttpController::service(HttpRequest &request, HttpResponse &respon
 IResourceHttpController::PathElements IResourceHttpController::splitPath(QString path)
 {
     PathElements result;
-    QStringList tokens = path.split("/", QString::SkipEmptyParts);
+    QStringList tokens = path.split("/", Qt::SkipEmptyParts);
 
     if(tokens.count() < 2)
     {
