@@ -18,11 +18,11 @@ cmake_minimum_required(VERSION 3.26)
 
 project(quickhub-rest VERSION 0.1.0 LANGUAGES CXX)
 
-find_package(Qt6 REQUIRED COMPONENTS Core WebSockets Qml Network)
+find_package(Qt6 REQUIRED COMPONENTS Core WebSockets Qml Network Gui)
 
 qt_standard_project_setup()
 
-qt_add_library(QHRest MODULE
+qt_add_library(QHRest SHARED
     # Main HTTP server plugin sources
     src/Controller/FileController.cpp
     src/Controller/FileController.h
@@ -74,11 +74,11 @@ target_compile_definitions(QHRest PRIVATE
 
 # Handle version-specific defines for Qt
 if(Qt6_VERSION VERSION_GREATER_EQUAL 5.14.0)
-    target_compile_definitions(QHRest PRIVATE
+  target_compile_definitions(QHRest PRIVATE
         SKIP_EMPTY_PARTS=Qt::SkipEmptyParts
     )
 else()
-    target_compile_definitions(QHRest PRIVATE
+  target_compile_definitions(QHRest PRIVATE
         SKIP_EMPTY_PARTS=QString::SkipEmptyParts
     )
 endif()
@@ -88,6 +88,7 @@ target_link_libraries(QHRest PRIVATE
     Qt6::WebSockets
     Qt6::Qml
     Qt6::Network
+    Qt6::Gui
     QHCore
     2log-core
     QHPluginSystem
