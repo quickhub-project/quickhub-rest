@@ -44,7 +44,7 @@ void RequestMapper::service(HttpRequest& request, HttpResponse& response)
 {
 
     QString path = QString::fromLatin1(request.getPath());
-    QStringList tokens = path.split("/", QString::SkipEmptyParts);
+    QStringList tokens = path.split("/", Qt::SkipEmptyParts);
     QString firstElement = path;
     if(tokens.count() > 0)
         firstElement = tokens.first();
