@@ -30,10 +30,10 @@ class HttpServerPlugin : public IPlugin
 
 public:
     HttpServerPlugin(QObject* parent = 0);
-    virtual bool init(QVariantMap parameters);
-    virtual bool shutdown();
+    bool init(QVariantMap parameters) override;
+    bool shutdown() override;
     Q_INVOKABLE virtual QSet<QString> requires() override { return QSet<QString>(); }
-    virtual QString getPluginName();
+    QString getPluginName() override;
 };
 
 #endif // HTTPSERVERPLUGIN_H

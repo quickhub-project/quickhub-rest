@@ -76,7 +76,9 @@ void IResourceHttpController::service(HttpRequest &request, HttpResponse &respon
     QString command = QString::fromLatin1( params.value("command"));
 
     if(path.right(1) == "/")
-        path = path.remove(path.count()-1, 1);
+    {
+        path = path.remove(path.size()-1, 1);
+    }
 
     params.remove("token");
     params.remove("command");
