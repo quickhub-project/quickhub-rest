@@ -36,6 +36,8 @@ qt_add_library(QHRest SHARED
     src/Controller/LoginController.h
     src/Controller/ObjectController.cpp
     src/Controller/ObjectController.h
+    src/Controller/ServiceController.cpp
+    src/Controller/ServiceController.h
     src/HttpServer.cpp
     src/HttpServer.h
     src/HttpServer_global.h

@@ -20,6 +20,8 @@
 #define IRESOURCEHTTPCONTROLLER_H
 
 #include <QObject>
+#include <QThread>
+#include <QMetaObject>
 #include "httprequesthandler.h"
 #include "Server/Resources/ResourceManager/IResource.h"
 
@@ -41,23 +43,36 @@ public:
         QStringList additionalElements;
     };
 
-    /** Constructor */
     IResourceHttpController(bool checkToken = true);
-
-    /** Generates the response */
     void service(HttpRequest& request, HttpResponse& response);
-    virtual void handleResourceOperation(QString token, PathElements& pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response) = 0;
+    virtual void handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response) = 0;
 
 protected:
-    void invalidData(HttpResponse& response, QString description = "");
+    void sendJsonError(HttpResponse& response, int statusCode, const QString& message);
+    void invalidData(HttpResponse& response, const QString& description = "");
     void invalidToken(HttpResponse& response);
-    void permissionDenied(HttpResponse& response, QString description = "");
-    bool handleError(IResource::ResourceError& error, HttpResponse& response, bool last = true);
-    void handleMofidicationResult(IResource::ModificationResult& result, HttpResponse& response, bool last = true);
-    void writeVariant(QVariant& variant, HttpResponse& response, bool isLast = true);
-    IResourceHttpController::PathElements splitPath(QString path);
-    QString preparePath(PathElements &elements, User* user);
-    QSharedPointer<IResource> getResource(QString path, QString type, QString token, HttpResponse &response);
+    void permissionDenied(HttpResponse& response, const QString& description = "");
+    void notFound(HttpResponse& response, const QString& description = "");
+    bool handleError(IResource::ResourceError error, HttpResponse& response);
+    void handleModificationResult(IResource::ModificationResult& result, HttpResponse& response);
+    void writeJsonSuccess(HttpResponse& response, const QVariant& data = QVariant());
+    void writeVariant(const QVariant& variant, HttpResponse& response);
+    IResourceHttpController::PathElements splitPath(const QString& path);
+    QSharedPointer<IResource> getResource(const QString& path, const QString& type, const QString& token, HttpResponse &response);
+
+    template<typename Func>
+    auto invokeOnResourceThread(QObject* resource, Func&& func) -> decltype(func())
+    {
+        using Result = decltype(func());
+        if (QThread::currentThread() == resource->thread()) {
+            return func();
+        }
+        Result result;
+        QMetaObject::invokeMethod(resource, [&]() {
+            result = func();
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    }
 
 private:
     bool _checkHttpTokens;

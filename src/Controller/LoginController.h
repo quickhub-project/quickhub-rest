@@ -25,13 +25,12 @@
 using namespace stefanfrings;
 class LoginController : public HttpRequestHandler
 {
-
     Q_OBJECT
     Q_DISABLE_COPY(LoginController)
 
 public:
     LoginController();
-    virtual void service(HttpRequest& request, HttpResponse& response);
+    void service(HttpRequest& request, HttpResponse& response) override;
 };
 
 #endif // LOGINCONTROLLER_H

@@ -19,6 +19,7 @@
 
 #include "IResourceHttpController.h"
 #include <QJsonDocument>
+#include <QJsonObject>
 
 #include "Server/Resources/ResourceManager/ResourceManager.h"
 #include "Server/Authentication/AuthentificationService.h"
@@ -32,120 +33,89 @@ IResourceHttpController::IResourceHttpController(bool checkToken):
 {
 }
 
-/*
-    Prepares the parameters and checks the context (session token, user parameters) for
-    the derived Resource Controller.
-*/
 void IResourceHttpController::service(HttpRequest &request, HttpResponse &response)
 {
+    response.setHeader("Content-Type", "application/json; charset=UTF-8");
 
-    HttpSession session=sessionStore->getSession(request,response);
-    QMultiMap<QByteArray,QByteArray> params = request.getParameterMap();
+    HttpSession session = sessionStore->getSession(request, response);
+    QMultiMap<QByteArray, QByteArray> params = request.getParameterMap();
     QString token;
     QString path = QString::fromLatin1(request.getPath());
 
-
-    if (session.contains("token"))
-        token = session.get("token").toString();
-    else
-        token = QString::fromLatin1( params.value("token"));
-
-
-    if(token.isEmpty() && _checkHttpTokens)
-    {
-        QString userName = request.getParameter("user");
-        QString password = request.getParameter("pass");
-        if(!userName.isEmpty() && !password.isEmpty())
-        {
-            AuthenticationService::ErrorCode errCode;
-            token = AuthenticationService::instance()->login(userName, password, &errCode);
-            if(errCode == AuthenticationService::NoError)
-            {
-                session.set("token", token);
-            }
-        }
-        else
-        {
-           session.set("initial",path);
-           response.redirect("/login");
-           return;
-        }
+    // 1. Authorization: Bearer <token>
+    QString authHeader = QString::fromLatin1(request.getHeader("Authorization"));
+    if (authHeader.startsWith("Bearer ", Qt::CaseInsensitive)) {
+        token = authHeader.mid(7).trimmed();
     }
 
+    // 2. Session cookie fallback
+    if (token.isEmpty() && session.contains("token")) {
+        token = session.get("token").toString();
+    }
 
-    QString command = QString::fromLatin1( params.value("command"));
+    // 3. Query parameter fallback
+    if (token.isEmpty()) {
+        token = QString::fromLatin1(params.value("token"));
+    }
 
-    if(path.right(1) == "/")
-    {
-        path = path.remove(path.size()-1, 1);
+    if (token.isEmpty() && _checkHttpTokens) {
+        invalidToken(response);
+        return;
+    }
+
+    if (path.endsWith('/')) {
+        path.chop(1);
     }
 
     params.remove("token");
-    params.remove("command");
 
-    if(_checkHttpTokens)
-    {
-        qDebug()<< token<<": "<<command;
-
+    if (_checkHttpTokens) {
         iIdentityPtr user = AuthenticationService::instance()->validateToken(token);
-        if(user.isNull())
-        {
-            qDebug()<<Q_FUNC_INFO<<" - Invalid token.";
+        if (user.isNull()) {
             invalidToken(response);
             return;
         }
     }
 
     QVariantMap parameters;
-    QVariant body;
     QJsonParseError error;
-    QJsonDocument bodyJson = QJsonDocument::fromJson(request.getBody(), &error);
-    if(!bodyJson.isEmpty())
-    {
-        if(error.error != QJsonParseError::NoError)
-            qDebug()<<Q_FUNC_INFO<<"- JSON Error: "<<error.errorString();
-        else
-            body = bodyJson.toVariant();
-    }
-
-    if(body.isValid())
-    {
-        parameters = body.toMap();
-    }
-    else
-    {
-        QMultiMapIterator<QByteArray,QByteArray> it(params);
-        while(it.hasNext())
-        {
+    QByteArray body = request.getBody();
+    if (!body.isEmpty()) {
+        QJsonDocument bodyJson = QJsonDocument::fromJson(body, &error);
+        if (error.error != QJsonParseError::NoError) {
+            sendJsonError(response, 400, "Invalid JSON: " + error.errorString());
+            return;
+        }
+        parameters = bodyJson.toVariant().toMap();
+    } else {
+        QMultiMapIterator<QByteArray, QByteArray> it(params);
+        while (it.hasNext()) {
             it.next();
-            parameters.insert(it.key(), it.value());
+            parameters.insert(QString::fromLatin1(it.key()), QString::fromLatin1(it.value()));
         }
     }
 
     PathElements elements = splitPath(path);
-    handleResourceOperation(token, elements, command, parameters, request, response);
+    handleResourceOperation(token, elements, parameters, request, response);
 }
 
-IResourceHttpController::PathElements IResourceHttpController::splitPath(QString path)
+IResourceHttpController::PathElements IResourceHttpController::splitPath(const QString& path)
 {
     PathElements result;
     QStringList tokens = path.split("/", Qt::SkipEmptyParts);
 
-    if(tokens.count() < 2)
-    {
+    if (tokens.count() < 2) {
         result.valid = false;
         return result;
     }
 
     result.type = tokens[0];
-    result.resource = tokens[1].replace(".","/");
-    if(tokens.count() > 2)
-    {
+    result.resource = tokens[1].replace(".", "/");
+    if (tokens.count() > 2) {
         result.id = tokens[2];
-        result.path = result.resource +"/"+ result.id;
+        result.path = result.resource + "/" + result.id;
 
-        for(int i = 3; i < tokens.count(); i++)
-        {
+        for (int i = 3; i < tokens.count(); i++) {
             result.additionalElements.append(tokens[i]);
         }
     }
@@ -154,71 +124,104 @@ IResourceHttpController::PathElements IResourceHttpController::splitPath(QString
     return result;
 }
 
-void IResourceHttpController::invalidData(HttpResponse &response, QString description)
+void IResourceHttpController::sendJsonError(HttpResponse &response, int statusCode, const QString &message)
 {
-    response.setStatus(400, "Invalid data / Insufficiant arguments.");
-    response.write("Invalid data / Insufficiant arguments. "+description.toLatin1(),true);
+    QJsonObject obj;
+    obj["error"] = true;
+    obj["code"] = statusCode;
+    obj["message"] = message;
+    response.setStatus(statusCode, message.toLatin1());
+    response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
+}
+
+void IResourceHttpController::invalidData(HttpResponse &response, const QString& description)
+{
+    QString msg = "Invalid data / Insufficient arguments";
+    if (!description.isEmpty())
+        msg += ": " + description;
+    sendJsonError(response, 400, msg);
 }
 
 void IResourceHttpController::invalidToken(HttpResponse &response)
 {
-    response.setStatus(403, "Invalid token.");
-    response.write("Invalid token. Please log in and try again.",true);
+    sendJsonError(response, 403, "Invalid token. Please log in and try again.");
 }
 
-void IResourceHttpController::permissionDenied(HttpResponse &response, QString description)
+void IResourceHttpController::permissionDenied(HttpResponse &response, const QString& description)
 {
-    response.setStatus(403, "Permission Denied.");
-    response.write("Permission Denied. " + description.toLatin1(), true);
+    QString msg = "Permission denied";
+    if (!description.isEmpty())
+        msg += ": " + description;
+    sendJsonError(response, 403, msg);
 }
 
-bool IResourceHttpController::handleError(IResource::ResourceError& error, HttpResponse& response, bool last)
+void IResourceHttpController::notFound(HttpResponse &response, const QString& description)
 {
-    switch(error)
-    {
-        case IResource::NO_ERROR:
-            response.setStatus(200, "OK");
-            return false;
-        case IResource::INVALID_PARAMETERS:
-            invalidData(response);
-            return true;
-        case IResource::PERMISSION_DENIED:
-            permissionDenied(response);
-            return true;
-        case IResource::UNKNOWN_ITEM:
-            response.setStatus(404, "Unknown Item.");
-            response.write("Unknown Item.",last);
-            return true;
-        default:
-            response.setStatus(500, "Something went wrong...");
-            response.write("Oohps, something went wrong..", last);
-            return true;
+    QString msg = "Not found";
+    if (!description.isEmpty())
+        msg += ": " + description;
+    sendJsonError(response, 404, msg);
+}
+
+bool IResourceHttpController::handleError(IResource::ResourceError error, HttpResponse& response)
+{
+    switch (error) {
+    case IResource::NO_ERROR:
+        return false;
+    case IResource::INVALID_PARAMETERS:
+        invalidData(response);
+        return true;
+    case IResource::PERMISSION_DENIED:
+        permissionDenied(response);
+        return true;
+    case IResource::UNKNOWN_ITEM:
+        notFound(response, "Unknown item");
+        return true;
+    default:
+        sendJsonError(response, 500, "Internal server error");
+        return true;
     }
 }
 
-void IResourceHttpController::handleMofidicationResult(IResource::ModificationResult &result, HttpResponse &response, bool last)
+void IResourceHttpController::handleModificationResult(IResource::ModificationResult &result, HttpResponse &response)
 {
-    if(!handleError(result.error, response, last))
-    {
-        writeVariant(result.data, response, last);
+    if (!handleError(result.error, response)) {
+        writeVariant(result.data, response);
     }
 }
 
-void IResourceHttpController::writeVariant(QVariant &variant, HttpResponse &response, bool isLast)
+void IResourceHttpController::writeJsonSuccess(HttpResponse &response, const QVariant &data)
 {
-    response.write(QJsonDocument::fromVariant(variant).toJson(), isLast);
+    QJsonObject obj;
+    obj["error"] = false;
+    if (data.isValid())
+        obj["data"] = QJsonValue::fromVariant(data);
+    response.setStatus(200, "OK");
+    response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
 }
 
-resourcePtr IResourceHttpController::getResource(QString path, QString type, QString token, HttpResponse &response)
+void IResourceHttpController::writeVariant(const QVariant &variant, HttpResponse &response)
+{
+    response.setStatus(200, "OK");
+    auto responseData = QJsonDocument::fromVariant(variant).toJson(QJsonDocument::Compact);
+    qDebug()<<responseData;
+    response.write(responseData, true);
+}
+
+resourcePtr IResourceHttpController::getResource(const QString& path, const QString& type, const QString& token, HttpResponse &response)
 {
     Err::CloudError error;
     resourcePtr resource = ResourceManager::instance()->getOrCreateResource(type, path, token, &error);
 
-    if(error == Err::NO_ERROR)
+    if (error == Err::NO_ERROR)
         return resource;
 
-    if(error == Err::INVALID_TOKEN)
+    if (error == Err::INVALID_TOKEN)
         invalidToken(response);
+    else if (error == Err::PERMISSION_DENIED)
+        permissionDenied(response);
+    else
+        sendJsonError(response, 500, "Could not access resource");
 
     return resourcePtr();
 }

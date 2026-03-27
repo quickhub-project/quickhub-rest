@@ -19,9 +19,7 @@
 #ifndef LISTCONTROLLER_H
 #define LISTCONTROLLER_H
 
-#include "httprequesthandler.h"
 #include "IResourceHttpController.h"
-#include <QObject>
 
 using namespace stefanfrings;
 class ListResource;
@@ -31,13 +29,11 @@ class ListController : public IResourceHttpController
     Q_DISABLE_COPY(ListController)
 
 public:
-    /** Constructor */
     ListController();
-    ~ListController(){}
+    void handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response) override;
 
-    /** Generates the response */
-    void handleResourceOperation(QString token, PathElements& pathElements, QString command, QVariantMap parameters,HttpRequest &request, HttpResponse &response);
-
+private:
+    static void resolveId(const QString& id, int& outIndex, QString& outUuid);
 };
 
 #endif // LISTCONTROLLER_H

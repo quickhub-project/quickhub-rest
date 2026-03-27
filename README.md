@@ -77,11 +77,28 @@ sslCertFile=/path/to/cert.pem
 
 - `GET /login` - Login page
 - `POST /login` - Authentication
-- `GET|POST /lists/{resource}` - List resource operations
+- `GET|POST|PUT|PATCH|DELETE /lists/{resource}[/{id}]` - List resource operations (see below)
 - `GET|POST /objects/{resource}` - Object resource operations
 - `GET|POST /images/{resource}` - Image resource operations
 - `GET|POST /files/{resource}` - File operations
 - `GET /*` - Static file serving
+
+### List API
+
+The `{id}` parameter in list endpoints can be either a **UUID string** or an **integer index**.
+If the value is a valid integer it is interpreted as a positional index into the list;
+otherwise it is treated as a UUID.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/lists/{resource}` | Get full list |
+| GET | `/lists/{resource}/{id}` | Get single item by UUID or index |
+| POST | `/lists/{resource}` | Append item (`{"data": ...}`) |
+| POST | `/lists/{resource}?index={n}` | Insert item at index |
+| PUT | `/lists/{resource}/{id}` | Replace item by UUID or index |
+| PATCH | `/lists/{resource}/{id}` | Update item properties by UUID or index |
+| DELETE | `/lists/{resource}/{id}` | Remove item by UUID or index |
+| DELETE | `/lists/{resource}` | Delete entire list |
 
 ## Dependencies
 

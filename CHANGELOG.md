@@ -1,5 +1,13 @@
 # Changelog - quickhub-rest
 
+## [2.1.0] - 2026-03-22
+
+### Added
+- **Index-based item access**: List items can now be addressed by integer index
+  in addition to UUID in all REST operations (GET, PUT, PATCH, DELETE).
+  If the `{id}` path segment is a valid integer it is interpreted as a positional
+  index; otherwise it is treated as a UUID. This is fully backwards-compatible.
+
 ## [2.0.0] - 2025-10-18
 
 ### Major Changes

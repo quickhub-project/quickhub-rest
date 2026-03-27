@@ -15,37 +15,20 @@
 * along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-/**
-  @file
-  @author Stefan Frings, modified by Friedemann Metzger
-*/
+#ifndef IMAGECONTROLLER_H
+#define IMAGECONTROLLER_H
 
-#ifndef FILEUPLOADCONTROLLER_H
-#define FILEUPLOADCONTROLLER_H
-
-#include "httprequest.h"
-#include "httpresponse.h"
-#include "httprequesthandler.h"
 #include "IResourceHttpController.h"
 
 using namespace stefanfrings;
-
-/**
-  This controller displays a HTML form for file upload and recieved the file.
-*/
-
-
-class ImageController : public IResourceHttpController {
+class ImageController : public IResourceHttpController
+{
     Q_OBJECT
     Q_DISABLE_COPY(ImageController)
 
 public:
-
-    /** Constructor */
     ImageController();
-
-    /** Generates the response */
-    void handleResourceOperation(QString token, PathElements& pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response);
+    void handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response) override;
 };
 
-#endif // FILEUPLOADCONTROLLER_H
+#endif // IMAGECONTROLLER_H
