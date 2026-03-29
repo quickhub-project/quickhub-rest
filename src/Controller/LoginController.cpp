@@ -19,6 +19,7 @@
 #include "LoginController.h"
 #include "Server/Authentication/AuthentificationService.h"
 #include "Server/Authentication/User.h"
+#include "IResourceHttpController.h"
 #include "httpsessionstore.h"
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -41,7 +42,8 @@ void LoginController::service(HttpRequest &request, HttpResponse &response)
     if (path.contains("logout", Qt::CaseInsensitive)) {
         QString token = session.get("token").toString();
         if (!token.isEmpty()) {
-            AuthenticationService::instance()->logout(token);
+            QMetaObject::invokeMethod(AuthenticationService::instance(), "logout", Qt::QueuedConnection,
+                                      Q_ARG(QString, token));
             session.remove("token");
         }
         QJsonObject obj;
@@ -53,7 +55,7 @@ void LoginController::service(HttpRequest &request, HttpResponse &response)
 
     // Check if already logged in
     QString existingToken = session.get("token").toString();
-    if (!existingToken.isEmpty() && AuthenticationService::instance()->validateToken(existingToken)) {
+    if (!existingToken.isEmpty() && IResourceHttpController::isValidToken(existingToken)) {
         QJsonObject obj;
         obj["token"] = existingToken;
         response.setStatus(200, "OK");
@@ -89,7 +91,8 @@ void LoginController::service(HttpRequest &request, HttpResponse &response)
     }
 
     AuthenticationService::ErrorCode errCode;
-    QString token = AuthenticationService::instance()->login(userName, password, &errCode);
+    auto authController = AuthenticationService::instance();
+    QString token = IResourceHttpController::invokeOnOwnerThread(authController, [&](){return authController->login(userName, password, &errCode);});
     if (errCode == AuthenticationService::NoError) {
         session.set("token", token);
         QJsonObject obj;

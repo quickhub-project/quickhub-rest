@@ -72,8 +72,10 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
             return;
         }
 
-        IResource::ModificationResult result = invokeOnResourceThread(imgResource.data(), [&]() {
-            return imgResource->insert(image, QVariant(), filename, token);
+        IResource::ModificationResult result = invokeOnOwnerThread(imgResource.data(), [&]() {
+            auto returnVal =imgResource->insert(image, QVariant(), filename, token);
+            imgResource.reset();
+            return returnVal;
         });
         handleModificationResult(result, response);
         return;
@@ -99,9 +101,10 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
 
         QStringList ids;
         QVariantMap metadata;
-        invokeOnResourceThread(imgResource.data(), [&]() {
+        invokeOnOwnerThread(imgResource.data(), [&]() {
             ids = imgResource->getAllImageIds(token);
             metadata = imgResource->getAllMetadata();
+            imgResource.reset();
             return true;
         });
 
@@ -131,8 +134,10 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
             return;
         }
 
-        QImage img = invokeOnResourceThread(imgResource.data(), [&]() {
-            return imgResource->getImage(pathElements.id, token);
+        QImage img = invokeOnOwnerThread(imgResource.data(), [&]() {
+            auto returnVal = imgResource->getImage(pathElements.id, token);
+            imgResource.reset();
+            return returnVal;
         });
 
         if (img.isNull()) {
@@ -170,8 +175,10 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
             return;
         }
 
-        IResource::ModificationResult result = invokeOnResourceThread(imgResource.data(), [&]() {
-            return imgResource->deleteImage(pathElements.id, token);
+        IResource::ModificationResult result = invokeOnOwnerThread(imgResource.data(), [&]() {
+            auto returnVal = imgResource->deleteImage(pathElements.id, token);
+            imgResource.reset();
+            return returnVal;
         });
         handleModificationResult(result, response);
         return;

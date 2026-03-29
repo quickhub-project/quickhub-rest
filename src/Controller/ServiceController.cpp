@@ -99,7 +99,7 @@ void ServiceController::handleResourceOperation(QString token, PathElements& pat
         QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
         timer.start(30000);
 
-        bool accepted = invokeOnResourceThread(service, [&]() {
+        bool accepted = invokeOnOwnerThread(service, [&]() {
             return service->call(methodName, token, cbID, argument);
         });
         if (!accepted) {

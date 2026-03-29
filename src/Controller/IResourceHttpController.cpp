@@ -1,19 +1,16 @@
 /* This file is part of the REST Plugin for the QuickHub framework
-* (git@github.com:quickhub-project/quickhub-rest.git).
-* Copyright (c) 2021 Friedemann Metzger - www.quickhub.org
-*
-* This program is free software: you can redistribute it and/or modify
-* it under the terms of the GNU General Public License as published by
-* the Free Software Foundation, version 3.
-*
-* This program is distributed in the hope that it will be useful, but
-* WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-* General Public License for more details.
-*
-* You should have received a copy of the GNU General Public License
-* along with this program. If not, see <http://www.gnu.org/licenses/>.
-*/
+ * (git@github.com:quickhub-project/quickhub-rest.git).
+ * Copyright (c) 2021 Friedemann Metzger - www.quickhub.org
+ *  * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, version 3.
+ *  * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *  * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 
 
 
@@ -70,8 +67,8 @@ void IResourceHttpController::service(HttpRequest &request, HttpResponse &respon
     params.remove("token");
 
     if (_checkHttpTokens) {
-        iIdentityPtr user = AuthenticationService::instance()->validateToken(token);
-        if (user.isNull()) {
+        bool valid = isValidToken(token);
+        if (!valid) {
             invalidToken(response);
             return;
         }
@@ -195,7 +192,9 @@ void IResourceHttpController::writeJsonSuccess(HttpResponse &response, const QVa
     QJsonObject obj;
     obj["error"] = false;
     if (data.isValid())
+    {
         obj["data"] = QJsonValue::fromVariant(data);
+    }
     response.setStatus(200, "OK");
     response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
 }
@@ -208,20 +207,35 @@ void IResourceHttpController::writeVariant(const QVariant &variant, HttpResponse
     response.write(responseData, true);
 }
 
+bool IResourceHttpController::isValidToken(QString token)
+{
+    return invokeOnOwnerThread(AuthenticationService::instance(), [&](){return AuthenticationService::instance()->isValidToken(token);});
+}
+
 resourcePtr IResourceHttpController::getResource(const QString& path, const QString& type, const QString& token, HttpResponse &response)
 {
     Err::CloudError error;
-    resourcePtr resource = ResourceManager::instance()->getOrCreateResource(type, path, token, &error);
+
+    auto resourceManager = ResourceManager::instance();
+    resourcePtr resource = invokeOnOwnerThread(resourceManager, [&](){return resourceManager->getOrCreateResource(type, path, token, &error);});
 
     if (error == Err::NO_ERROR)
+    {
         return resource;
+    }
 
     if (error == Err::INVALID_TOKEN)
+    {
         invalidToken(response);
+    }
     else if (error == Err::PERMISSION_DENIED)
+    {
         permissionDenied(response);
+    }
     else
+    {
         sendJsonError(response, 500, "Could not access resource");
+    }
 
     return resourcePtr();
 }

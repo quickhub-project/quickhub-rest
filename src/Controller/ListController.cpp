@@ -59,8 +59,10 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
         if (hasId) {
             int index; QString uuid;
             resolveId(pathElements.id, index, uuid);
-            QVariant item = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->getItem(index, uuid);
+            QVariant item = invokeOnOwnerThread(resource.data(), [&]() {
+                auto returnVal = resource->getItem(index, uuid);
+                resource.reset();
+                return returnVal;
             });
             if (!item.isValid()) {
                 notFound(response, "Item not found");
@@ -68,8 +70,10 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
             }
             writeVariant(item, response);
         } else {
-            QVariantList data = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->getListData();
+            QVariantList data = invokeOnOwnerThread(resource.data(), [&]() {
+                auto returnVal = resource->getListData();
+                resource.reset();
+                return returnVal;
             });
             QVariant v(data);
             writeVariant(v, response);
@@ -94,13 +98,17 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
                 invalidData(response, "Invalid index");
                 return;
             }
-            ListResource::ModificationResult result = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->insertAt(data, index, token);
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result =resource->insertAt(data, index, token);
+                resource.reset();
+                return result;
             });
             handleModificationResult(result, response);
         } else {
-            ListResource::ModificationResult result = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->appendItem(data, token);
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = resource->appendItem(data, token);
+                resource.reset();
+                return result;
             });
             handleModificationResult(result, response);
         }
@@ -120,8 +128,10 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
         }
         int index; QString uuid;
         resolveId(pathElements.id, index, uuid);
-        ListResource::ModificationResult result = invokeOnResourceThread(resource.data(), [&]() {
-            return resource->set(data, index, uuid, token);
+        ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+            auto returnVal = resource->set(data, index, uuid, token);
+            resource.reset();
+            return returnVal;
         });
         handleModificationResult(result, response);
         return;
@@ -146,7 +156,7 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
         int index; QString uuid;
         resolveId(pathElements.id, index, uuid);
         ListResource::ModificationResult lastResult;
-        invokeOnResourceThread(resource.data(), [&]() {
+        invokeOnOwnerThread(resource.data(), [&]() {
             QMapIterator<QString, QVariant> it(dataMap);
             while (it.hasNext()) {
                 it.next();
@@ -154,6 +164,7 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
                 if (lastResult.error != IResource::NO_ERROR)
                     break;
             }
+            resource.reset();
             return true;
         });
         handleModificationResult(lastResult, response);
@@ -166,13 +177,17 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
         if (hasId) {
             int index; QString uuid;
             resolveId(pathElements.id, index, uuid);
-            ListResource::ModificationResult result = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->removeItem(uuid, token, index);
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = resource->removeItem(uuid, token, index);
+                resource.reset();
+                return result;
             });
             handleModificationResult(result, response);
         } else {
-            ListResource::ModificationResult result = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->deleteList(token);
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = resource->deleteList(token);
+                resource.reset();
+                return result;
             });
             handleModificationResult(result, response);
         }

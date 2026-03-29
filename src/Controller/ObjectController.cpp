@@ -43,8 +43,10 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
     if (method == "GET") {
         if (hasProperty) {
             QString property = pathElements.id;
-            QVariantMap objData = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->getObjectData();
+            QVariantMap objData = invokeOnOwnerThread(resource.data(), [&]() {
+                auto data = resource->getObjectData();
+                resource.reset();
+                return data;
             });
             QVariant data = objData.value(property);
             if (!data.isValid()) {
@@ -53,8 +55,10 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
             }
             writeVariant(data, response);
         } else {
-            QVariantMap data = invokeOnResourceThread(resource.data(), [&]() {
-                return resource->getObjectData();
+            QVariantMap data = invokeOnOwnerThread(resource.data(), [&]() {
+                auto data = resource->getObjectData();;
+                resource.reset();
+                return data;
             });
             QVariant v(data);
             writeVariant(v, response);
@@ -74,8 +78,10 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
             return;
         }
         QString property = pathElements.id;
-        ObjectResource::ModificationResult result = invokeOnResourceThread(resource.data(), [&]() {
-            return resource->setProperty(property, data, token);
+        ObjectResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+            auto result = resource->setProperty(property, data, token);
+            resource.reset();
+            return result;
         });
         handleModificationResult(result, response);
         return;
@@ -94,7 +100,7 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
             return;
         }
         ObjectResource::ModificationResult lastResult;
-        invokeOnResourceThread(resource.data(), [&]() {
+        invokeOnOwnerThread(resource.data(), [&]() {
             QMapIterator<QString, QVariant> it(dataMap);
             while (it.hasNext()) {
                 it.next();
@@ -102,6 +108,7 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
                 if (lastResult.error != IResource::NO_ERROR)
                     break;
             }
+            resource.reset();
             return true;
         });
         handleModificationResult(lastResult, response);

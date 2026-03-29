@@ -46,6 +46,20 @@ public:
     IResourceHttpController(bool checkToken = true);
     void service(HttpRequest& request, HttpResponse& response);
     virtual void handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response) = 0;
+    static bool isValidToken(QString token);
+    template<typename Func>
+    static auto invokeOnOwnerThread(QObject* owner, Func&& func) -> decltype(func())
+    {
+        using Result = decltype(func());
+        if (QThread::currentThread() == owner->thread()) {
+            return func();
+        }
+        Result result;
+        QMetaObject::invokeMethod(owner, [&]() {
+            result = func();
+        }, Qt::BlockingQueuedConnection);
+        return result;
+    }
 
 protected:
     void sendJsonError(HttpResponse& response, int statusCode, const QString& message);
@@ -57,22 +71,11 @@ protected:
     void handleModificationResult(IResource::ModificationResult& result, HttpResponse& response);
     void writeJsonSuccess(HttpResponse& response, const QVariant& data = QVariant());
     void writeVariant(const QVariant& variant, HttpResponse& response);
+
     IResourceHttpController::PathElements splitPath(const QString& path);
     QSharedPointer<IResource> getResource(const QString& path, const QString& type, const QString& token, HttpResponse &response);
 
-    template<typename Func>
-    auto invokeOnResourceThread(QObject* resource, Func&& func) -> decltype(func())
-    {
-        using Result = decltype(func());
-        if (QThread::currentThread() == resource->thread()) {
-            return func();
-        }
-        Result result;
-        QMetaObject::invokeMethod(resource, [&]() {
-            result = func();
-        }, Qt::BlockingQueuedConnection);
-        return result;
-    }
+
 
 private:
     bool _checkHttpTokens;
