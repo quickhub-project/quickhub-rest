@@ -21,6 +21,7 @@
 #include "Server/Resources/ResourceManager/ResourceManager.h"
 #include <QBuffer>
 #include <QMimeDatabase>
+#include <QImageWriter>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -145,10 +146,18 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
             return;
         }
 
-        response.setHeader("Content-Type", "image/png");
+        QMimeDatabase mimeDb;
+        QMimeType mimeType = mimeDb.mimeTypeForFile(pathElements.id, QMimeDatabase::MatchExtension);
+        QByteArray format = mimeType.preferredSuffix().toUpper().toUtf8();
+        if (format == "JPG")
+            format = "JPEG";
+        if (!QImageWriter::supportedImageFormats().contains(format.toLower()))
+            format = "PNG";
+
+        response.setHeader("Content-Type", mimeType.name().toUtf8());
         QBuffer stream;
         stream.open(QBuffer::ReadWrite);
-        img.save(&stream, "PNG");
+        img.save(&stream, format.constData());
         stream.seek(0);
         while (!stream.atEnd()) {
             QByteArray buffer = stream.read(65536);
