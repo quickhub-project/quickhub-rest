@@ -19,6 +19,8 @@
 
 #include "ListController.h"
 #include "Server/Resources/ListResource/ListResource.h"
+#include "Server/Resources/ListResource/ListAccessProxy.h"
+#include "Server/Authentication/AuthentificationService.h"
 
 ListController::ListController() : IResourceHttpController()
 {
@@ -49,6 +51,8 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
         return;
     }
 
+    ListAccessProxy proxy(resource);
+    iIdentityPtr identity = AuthenticationService::instance()->validateToken(token);
 
     QByteArray method = request.getMethod();
     bool hasId = !pathElements.id.isEmpty();
@@ -60,7 +64,7 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
             int index; QString uuid;
             resolveId(pathElements.id, index, uuid);
             QVariant item = invokeOnOwnerThread(resource.data(), [&]() {
-                auto returnVal = resource->getItem(index, uuid);
+                auto returnVal = proxy.getItem(index, identity, uuid);
                 resource.reset();
                 return returnVal;
             });
@@ -71,7 +75,7 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
             writeVariant(item, response);
         } else {
             QVariantList data = invokeOnOwnerThread(resource.data(), [&]() {
-                auto returnVal = resource->getListData();
+                auto returnVal = proxy.getListData(identity);
                 resource.reset();
                 return returnVal;
             });
@@ -99,14 +103,14 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
                 return;
             }
             ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
-                auto result =resource->insertAt(data, index, token);
+                auto result = proxy.insertAt(data, index, token);
                 resource.reset();
                 return result;
             });
             handleModificationResult(result, response);
         } else {
             ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
-                auto result = resource->appendItem(data, token);
+                auto result = proxy.appendItem(data, token);
                 resource.reset();
                 return result;
             });
@@ -129,7 +133,7 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
         int index; QString uuid;
         resolveId(pathElements.id, index, uuid);
         ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
-            auto returnVal = resource->set(data, index, uuid, token);
+            auto returnVal = proxy.set(data, index, uuid, token);
             resource.reset();
             return returnVal;
         });
@@ -160,7 +164,7 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
             QMapIterator<QString, QVariant> it(dataMap);
             while (it.hasNext()) {
                 it.next();
-                lastResult = resource->setProperty(it.key(), it.value(), index, uuid, token);
+                lastResult = proxy.setProperty(it.key(), it.value(), index, uuid, token);
                 if (lastResult.error != IResource::NO_ERROR)
                     break;
             }
@@ -178,14 +182,14 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
             int index; QString uuid;
             resolveId(pathElements.id, index, uuid);
             ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
-                auto result = resource->removeItem(uuid, token, index);
+                auto result = proxy.removeItem(uuid, token, index);
                 resource.reset();
                 return result;
             });
             handleModificationResult(result, response);
         } else {
             ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
-                auto result = resource->deleteList(token);
+                auto result = proxy.deleteList(token);
                 resource.reset();
                 return result;
             });
