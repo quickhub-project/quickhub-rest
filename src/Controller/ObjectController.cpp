@@ -18,6 +18,8 @@
 
 #include "ObjectController.h"
 #include "Server/Resources/ObjectResource/ObjectResource.h"
+#include "Server/Resources/ObjectResource/ObjectAccessProxy.h"
+#include "Server/Authentication/AuthentificationService.h"
 
 ObjectController::ObjectController() : IResourceHttpController()
 {
@@ -35,6 +37,9 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
         return;
     }
 
+    ObjectAccessProxy proxy(resource);
+    iIdentityPtr identity = AuthenticationService::instance()->validateToken(token);
+
     QByteArray method = request.getMethod();
     bool hasProperty = !pathElements.id.isEmpty();
 
@@ -44,7 +49,7 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
         if (hasProperty) {
             QString property = pathElements.id;
             QVariantMap objData = invokeOnOwnerThread(resource.data(), [&]() {
-                auto data = resource->getObjectData();
+                auto data = proxy.getObjectData(identity);
                 resource.reset();
                 return data;
             });
@@ -56,7 +61,7 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
             writeVariant(data, response);
         } else {
             QVariantMap data = invokeOnOwnerThread(resource.data(), [&]() {
-                auto data = resource->getObjectData();;
+                auto data = proxy.getObjectData(identity);
                 resource.reset();
                 return data;
             });
@@ -79,7 +84,7 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
         }
         QString property = pathElements.id;
         ObjectResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
-            auto result = resource->setProperty(property, data, token);
+            auto result = proxy.setProperty(property, data, token);
             resource.reset();
             return result;
         });
@@ -104,7 +109,7 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
             QMapIterator<QString, QVariant> it(dataMap);
             while (it.hasNext()) {
                 it.next();
-                lastResult = resource->setProperty(it.key(), it.value(), token);
+                lastResult = proxy.setProperty(it.key(), it.value(), token);
                 if (lastResult.error != IResource::NO_ERROR)
                     break;
             }
