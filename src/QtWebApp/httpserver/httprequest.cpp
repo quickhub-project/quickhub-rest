@@ -416,7 +416,7 @@ void HttpRequest::parseMultiPartFile()
         while (!tempFile->atEnd() && !finished && !tempFile->error())
         {
             QByteArray line=tempFile->readLine(65536).trimmed();
-            if (line.startsWith("Content-Disposition:"))
+            if (line.toLower().startsWith("content-disposition:"))
             {
                 if (line.contains("form-data"))
                 {

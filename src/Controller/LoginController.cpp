@@ -19,58 +19,110 @@
 #include "LoginController.h"
 #include "Server/Authentication/AuthentificationService.h"
 #include "Server/Authentication/User.h"
+#include "IResourceHttpController.h"
 #include "httpsessionstore.h"
+#include <QJsonDocument>
+#include <QJsonObject>
 
-
-/** Storage for session cookies */
 extern HttpSessionStore* sessionStore;
-
 
 LoginController::LoginController()
 {
-
 }
 
 void LoginController::service(HttpRequest &request, HttpResponse &response)
 {
-    QString userName = request.getParameter("user");
-    QString password = request.getParameter("pass");
+    response.setHeader("Content-Type", "application/json; charset=UTF-8");
+    HttpSession session = sessionStore->getSession(request, response);
 
+    QByteArray method = request.getMethod();
 
-    HttpSession session=sessionStore->getSession(request,response);
-    QString token = session.get("token").toString();
-    if(!token.isEmpty() && AuthenticationService::instance()->validateToken(token))
-    {
-        response.write("You are logged in!");
+    // POST /logout
+    QString path = QString::fromLatin1(request.getPath());
+    if (path.contains("logout", Qt::CaseInsensitive)) {
+        QString token = session.get("token").toString();
+        if (!token.isEmpty()) {
+            QMetaObject::invokeMethod(AuthenticationService::instance(), "logout", Qt::QueuedConnection,
+                                      Q_ARG(QString, token));
+            session.remove("token");
+        }
+        QJsonObject obj;
+        obj["success"] = true;
+        response.setStatus(200, "OK");
+        response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
         return;
     }
 
-    if(token.isEmpty() && userName.isEmpty() && password.isEmpty())
-    {
-        response.write("Missing parameters.");
+    // Check if already logged in
+    QString existingToken = session.get("token").toString();
+    if (!existingToken.isEmpty() && IResourceHttpController::isValidToken(existingToken)) {
+        QJsonObject obj;
+        obj["token"] = existingToken;
+        response.setStatus(200, "OK");
+        response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
+        return;
+    }
+
+    // Parse credentials from JSON body or query parameters
+    QString userName;
+    QString password;
+
+    QJsonParseError parseError;
+    QJsonDocument bodyJson = QJsonDocument::fromJson(request.getBody(), &parseError);
+    if (!bodyJson.isEmpty() && parseError.error == QJsonParseError::NoError) {
+        QJsonObject bodyObj = bodyJson.object();
+        userName = bodyObj["user"].toString();
+        password = bodyObj["pass"].toString();
+    }
+
+    if (userName.isEmpty())
+        userName = request.getParameter("user");
+    if (password.isEmpty())
+        password = request.getParameter("pass");
+
+    if (userName.isEmpty() || password.isEmpty()) {
+        QJsonObject obj;
+        obj["error"] = true;
+        obj["code"] = 400;
+        obj["message"] = QString("Missing credentials");
+        response.setStatus(400, "Bad Request");
+        response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
         return;
     }
 
     AuthenticationService::ErrorCode errCode;
-    token = AuthenticationService::instance()->login(userName, password, &errCode);
-    if(errCode == AuthenticationService::NoError)
-    {
+    auto authController = AuthenticationService::instance();
+    QString token = IResourceHttpController::invokeOnOwnerThread(authController, [&](){return authController->login(userName, password, &errCode);});
+    if (errCode == AuthenticationService::NoError) {
         session.set("token", token);
+        QJsonObject obj;
+        obj["token"] = token;
+        response.setStatus(200, "OK");
+        response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
+        return;
+    }
 
-        if(session.contains("initial"))
-        {
-            QString redirectPath = session.get("initial").toString();
-            response.redirect(redirectPath.toLatin1());
-            return;
-        }
-        else
-        {
-            response.write(token.toLatin1(), true);
-            return;
-        }
+    QJsonObject obj;
+    obj["error"] = true;
+    int statusCode = 401;
+    QString message;
+    switch (errCode) {
+    case AuthenticationService::IncorrectPassword:
+        message = "Incorrect password";
+        break;
+    case AuthenticationService::UserNotExists:
+        message = "User not found";
+        break;
+    case AuthenticationService::PermissionDenied:
+        message = "Permission denied";
+        statusCode = 403;
+        break;
+    default:
+        message = "Login failed";
+        break;
     }
-    else
-    {
-        qCritical()<<Q_FUNC_INFO<<"  "<<errCode;
-    }
+    obj["code"] = statusCode;
+    obj["message"] = message;
+    response.setStatus(statusCode, message.toLatin1());
+    response.write(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
 }

@@ -15,108 +15,163 @@
 * along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 #include "FileController.h"
-#include "Server/Devices/DeviceManager.h"
 #include "Server/Authentication/AuthentificationService.h"
-#include "Server/Authentication/IUser.h"
 #include <QUuid>
-#include <QBuffer>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QMimeDatabase>
+#include <QStandardPaths>
+#include <QMutexLocker>
 
-
-QMap<QString, FileController::TempFile> FileController::_files = QMap<QString, FileController::TempFile>();
 QMutex FileController::_mutex;
 
-FileController::FileController(QObject *parent) : IResourceHttpController(false)
+FileController::FileController() : IResourceHttpController(true)
 {
-
 }
 
-void FileController::handleResourceOperation(QString token, IResourceHttpController::PathElements &pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
+QString FileController::uploadDir()
 {
-    Q_UNUSED(command)
-    Q_UNUSED(parameters)
-    QString id = pathElements.id;
-
-    _mutex.lock();
-    if(_files.contains(id))
-    {
-        response.setHeader("Content-Type", "application/octet-stream");
-        QBuffer stream;
-        stream.open(QBuffer::ReadWrite);
-        TempFile file = _files.take(id);
-        _mutex.unlock();
-        QTemporaryFile* tmpFile = file.file;
-        if(tmpFile->open())
-        {
-            QDataStream stream(file.file);
-            tmpFile->seek(0);
-            while (!tmpFile->atEnd())
-            {
-                QByteArray buffer=tmpFile->read(65536);
-                response.write(buffer);
-            }
-        }
-
-        delete tmpFile;
-        response.write("OK",true);
-        return;
+    QString dir = qEnvironmentVariable("FILE_UPLOAD_DIR");
+    if (dir.isEmpty()) {
+        dir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/uploads";
     }
-    _mutex.unlock();
+    QDir().mkpath(dir);
+    return dir;
+}
 
-    iIdentityPtr user = AuthenticationService::instance()->validateToken(token);
-    if(user.isNull())
-        invalidToken(response);
+void FileController::handleResourceOperation(QString token, PathElements &pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
+{
+    Q_UNUSED(parameters)
 
-    if (request.getParameter("upload") =="finish")
-    {
-        QTemporaryFile* file=request.getUploadedFile("file1");
+    QByteArray method = request.getMethod();
+    QString path = QString::fromLatin1(request.getPath());
+    QStringList segments = path.split("/", Qt::SkipEmptyParts);
 
-        QString filename = request.getParameter("file1");
-        QString path = pathElements.path;
-        QStringList tokens = path.split("/");
-        if (tokens.count() < 2)
-        {
-            invalidData(response, "Unknown endpoint");
+    // POST /files - upload file
+    if (method == "POST" && segments.count() == 1) {
+        QTemporaryFile* tmpFile = request.getUploadedFile("file");
+        QString filename = request.getParameter("file");
+        if (!tmpFile) {
+            invalidData(response, "No file uploaded (use multipart key 'file')");
             return;
         }
 
-        QString receiverType = tokens.takeFirst();
-        TempFile fileItem;
-        if (file)
-        {
-            if(receiverType == "device")
-            {
-                QString deviceID = tokens.at(0 );
-                deviceID = deviceID.replace(".", "/");
-                if(!DeviceManager::instance()->getMappings().contains(deviceID))
-                {
-                    invalidData(response, "Device not found");
-                    return;
-                }
+        QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        QString dir = uploadDir();
 
-                deviceHandlePtr device = DeviceManager::instance()->getHandleByMapping(deviceID);
-
-                fileItem.file = file;
-                fileItem.fileName = filename;
-                fileItem.id = QUuid::createUuid().toString().remove("{").remove("}");
-                fileItem.sender = user->identityID();
-                _mutex.lock();
-                _files.insert(fileItem.id, fileItem);
-                _mutex.unlock();
-                file->setProperty("inUse", true);
-                QVariantMap args = fileItem.toVariant();
-                qDebug()<<fileItem.toVariant();
-                IDevice::DeviceError err = device->triggerFunction("loadFile", fileItem.toVariant());
-                if(err == IDevice::NO_ERROR)
-                {
-                    response.write("OK", true);
-                    return;
-                }
+        QMimeDatabase mimeDb;
+        QString mimeType;
+        if (!filename.isEmpty()) {
+            mimeType = mimeDb.mimeTypeForFile(filename).name();
+        }
+        if (mimeType.isEmpty() || mimeType == "application/octet-stream") {
+            if (tmpFile->open()) {
+                tmpFile->seek(0);
+                QByteArray header = tmpFile->read(1024);
+                mimeType = mimeDb.mimeTypeForData(header).name();
             }
         }
 
-        response.setStatus(500, "Something went wrong...");
-        response.write("Oohps, something went wrong..", true);
+        QString destPath = dir + "/" + id;
+        if (tmpFile->open()) {
+            tmpFile->seek(0);
+            QFile destFile(destPath);
+            if (!destFile.open(QIODevice::WriteOnly)) {
+                sendJsonError(response, 500, "Could not write file to storage");
+                return;
+            }
+            while (!tmpFile->atEnd()) {
+                destFile.write(tmpFile->read(65536));
+            }
+            destFile.close();
+        } else {
+            sendJsonError(response, 500, "Could not read uploaded file");
+            return;
+        }
+
+        // Write metadata sidecar
+        QJsonObject meta;
+        meta["id"] = id;
+        meta["filename"] = filename;
+        meta["mimeType"] = mimeType;
+        meta["token"] = token;
+        meta["timestamp"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+        QFile metaFile(destPath + ".json");
+        if (metaFile.open(QIODevice::WriteOnly)) {
+            metaFile.write(QJsonDocument(meta).toJson(QJsonDocument::Compact));
+            metaFile.close();
+        }
+
+        Q_EMIT fileUploaded(id, filename, token);
+
+        QJsonObject result;
+        result["id"] = id;
+        result["filename"] = filename;
+        result["mimeType"] = mimeType;
+        result["url"] = "/files/" + id;
+        response.setStatus(201, "Created");
+        response.write(QJsonDocument(result).toJson(QJsonDocument::Compact), true);
+        return;
     }
+
+    // GET /files/{id} - download file
+    if (method == "GET" && segments.count() >= 2) {
+        QString id = segments[1];
+        QString filePath = uploadDir() + "/" + id;
+        QString metaPath = filePath + ".json";
+
+        QFile file(filePath);
+        if (!file.exists()) {
+            notFound(response, "File not found");
+            return;
+        }
+
+        QString mimeType = "application/octet-stream";
+        QFile metaFile(metaPath);
+        if (metaFile.open(QIODevice::ReadOnly)) {
+            QJsonObject meta = QJsonDocument::fromJson(metaFile.readAll()).object();
+            metaFile.close();
+            if (meta.contains("mimeType"))
+                mimeType = meta["mimeType"].toString();
+        }
+
+        response.setHeader("Content-Type", mimeType.toLatin1());
+        if (!file.open(QIODevice::ReadOnly)) {
+            sendJsonError(response, 500, "Could not read file");
+            return;
+        }
+        while (!file.atEnd()) {
+            response.write(file.read(65536));
+        }
+        file.close();
+        return;
+    }
+
+    // DELETE /files/{id} - delete file
+    if (method == "DELETE" && segments.count() >= 2) {
+        QString id = segments[1];
+        QString filePath = uploadDir() + "/" + id;
+        QString metaPath = filePath + ".json";
+
+        if (!QFile::exists(filePath)) {
+            notFound(response, "File not found");
+            return;
+        }
+
+        QMutexLocker locker(&_mutex);
+        QFile::remove(filePath);
+        QFile::remove(metaPath);
+        locker.unlock();
+
+        writeJsonSuccess(response);
+        return;
+    }
+
+    sendJsonError(response, 405, "Method not allowed");
 }

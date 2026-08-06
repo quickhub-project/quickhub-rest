@@ -17,68 +17,108 @@
 
 
 #include "ObjectController.h"
-#include <QJsonDocument>
+#include "Server/Resources/ObjectResource/ObjectResource.h"
+#include "Server/Resources/ObjectResource/ObjectAccessProxy.h"
+#include "Server/Authentication/AuthentificationService.h"
 
 ObjectController::ObjectController() : IResourceHttpController()
 {
-
 }
 
-void ObjectController::handleResourceOperation(QString token, PathElements& pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
+void ObjectController::handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
 {
-//    if(!pathElements.valid)
-//    {
-//        invalidData(response, "Path incomplete.");
-//        return;
-//    }
-
-    qDebug()<<pathElements.resource;
+    if (!pathElements.valid) {
+        invalidData(response, "Path incomplete");
+        return;
+    }
 
     QSharedPointer<ObjectResource> resource = getResource(pathElements.resource, "object", token, response).objectCast<ObjectResource>();
-
-    if(resource.isNull())
-    {
-        invalidData(response, "Resource not available");
+    if (resource.isNull()) {
         return;
     }
 
-    if(command.toLower() == "get" || (command.isEmpty() && (request.getMethod() == "GET")))
-    {
+    ObjectAccessProxy proxy(resource);
+    iIdentityPtr identity = AuthenticationService::instance()->validateToken(token);
 
-        QVariant var = resource->getObjectData();
-        writeVariant(var, response);
+    QByteArray method = request.getMethod();
+    bool hasProperty = !pathElements.id.isEmpty();
+
+    // GET /objects/{resource} - get full object
+    // GET /objects/{resource}/{property} - get single property
+    if (method == "GET") {
+        if (hasProperty) {
+            QString property = pathElements.id;
+            QVariantMap objData = invokeOnOwnerThread(resource.data(), [&]() {
+                auto data = proxy.getObjectData(identity);
+                resource.reset();
+                return data;
+            });
+            QVariant data = objData.value(property);
+            if (!data.isValid()) {
+                notFound(response, "Property not found");
+                return;
+            }
+            writeVariant(data, response);
+        } else {
+            QVariantMap data = invokeOnOwnerThread(resource.data(), [&]() {
+                auto data = proxy.getObjectData(identity);
+                resource.reset();
+                return data;
+            });
+            QVariant v(data);
+            writeVariant(v, response);
+        }
         return;
     }
 
-    if(command.toLower() == "set" || (command.isEmpty() && (request.getMethod() == "POST")))
-    {
-        QString property;
-        QVariant propertyVariant = parameters["property"];
-        QVariant data = parameters["data"];
-
-        if(!propertyVariant.isValid())
-        {
-
-           // property = last;
-        }
-        else
-        {
-            property = propertyVariant.toString();
-        }
-
-        if(!data.isValid() | property.isEmpty())
-        {
-            qDebug()<< Q_FUNC_INFO - "No valid data. Nothing to append.";
+    // PUT /objects/{resource}/{property} - set single property
+    if (method == "PUT") {
+        if (!hasProperty) {
+            invalidData(response, "Missing property name");
             return;
         }
-
-        ObjectResource::ModificationResult result = resource->setProperty(property, data, token);
-        if(result.error == ObjectResource::NO_ERROR)
-        {
-            iIdentityPtr  user = AuthenticationService::instance()->validateToken(token);
-            qDebug()<<user->identityID()+" appended data via http.";
+        QVariant data = parameters["data"];
+        if (!data.isValid()) {
+            invalidData(response, "Missing 'data' field");
+            return;
         }
+        QString property = pathElements.id;
+        ObjectResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+            auto result = proxy.setProperty(property, data, token);
+            resource.reset();
+            return result;
+        });
+        handleModificationResult(result, response);
+        return;
     }
+
+    // PATCH /objects/{resource} - set multiple properties
+    if (method == "PATCH") {
+        QVariant dataVariant = parameters["data"];
+        if (!dataVariant.isValid()) {
+            invalidData(response, "Missing 'data' field");
+            return;
+        }
+        QVariantMap dataMap = dataVariant.toMap();
+        if (dataMap.isEmpty()) {
+            invalidData(response, "Invalid data map");
+            return;
+        }
+        ObjectResource::ModificationResult lastResult;
+        invokeOnOwnerThread(resource.data(), [&]() {
+            QMapIterator<QString, QVariant> it(dataMap);
+            while (it.hasNext()) {
+                it.next();
+                lastResult = proxy.setProperty(it.key(), it.value(), token);
+                if (lastResult.error != IResource::NO_ERROR)
+                    break;
+            }
+            resource.reset();
+            return true;
+        });
+        handleModificationResult(lastResult, response);
+        return;
+    }
+
+    sendJsonError(response, 405, "Method not allowed");
 }
-
-

@@ -18,155 +18,185 @@
 
 
 #include "ListController.h"
-#include "Server/Resources/ResourceManager/ResourceManager.h"
 #include "Server/Resources/ListResource/ListResource.h"
+#include "Server/Resources/ListResource/ListAccessProxy.h"
 #include "Server/Authentication/AuthentificationService.h"
-#include "Server/Authentication/User.h"
-#include "QJsonDocument"
 
-
-ListController::ListController(): IResourceHttpController()
+ListController::ListController() : IResourceHttpController()
 {
 }
 
-void ListController::handleResourceOperation(QString token, PathElements& pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
+void ListController::resolveId(const QString& id, int& outIndex, QString& outUuid)
 {
-    if(!pathElements.valid)
-    {
-        invalidData(response, "Path incomplete.");
+    bool ok;
+    int idx = id.toInt(&ok);
+    if (ok) {
+        outIndex = idx;
+        outUuid = QString();
+    } else {
+        outIndex = -1;
+        outUuid = id;
+    }
+}
+
+void ListController::handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
+{
+    if (!pathElements.valid) {
+        invalidData(response, "Path incomplete");
         return;
     }
 
-    QSharedPointer<ListResource> resource = getResource(pathElements.resource,"synclist", token, response).objectCast<ListResource>();
-    if(!resource)
-        return;
-
-    int additionalElementCount = pathElements.additionalElements.count();
-
-    if(command.toLower() == "insert" || (command.isEmpty() && (request.getMethod() == "POST") && additionalElementCount == 1))
-    {
-        QVariant data = parameters["data"];
-        QVariant indexVariant = parameters["index"];
-
-        if(!indexVariant.isValid() && additionalElementCount >= 1)
-        {
-            indexVariant = pathElements.additionalElements[0];
-        }
-
-        bool ok;
-        int index = indexVariant.toInt(&ok);
-
-        if(!data.isValid() || !indexVariant.isValid() || !ok)
-        {
-            invalidData(response, "No valid index.");
-            return;
-        }
-
-        ListResource::ModificationResult result = resource->insertAt(data, index, token);
-        handleMofidicationResult(result, response);
+    QSharedPointer<ListResource> resource = getResource(pathElements.resource, "synclist", token, response).objectCast<ListResource>();
+    if (!resource){
         return;
     }
 
-    if(command.toLower() == "append" || (command.isEmpty() && (request.getMethod() == "POST")))
-    {
-        QVariant data = parameters["data"];
-        if(!data.isValid())
-        {
-            invalidData(response);
-            return;
-        }
-        ListResource::ModificationResult result = resource->appendItem(data, token);
-        handleMofidicationResult(result, response);
-        return;
-    }
+    ListAccessProxy proxy(resource);
+    iIdentityPtr identity = AuthenticationService::instance()->validateToken(token);
 
-    if(command.toLower() == "get" || (command.isEmpty() && (request.getMethod() == "GET")))
-    {
-        QVariant var = resource->getListData();
-        writeVariant(var, response);
-        return;
-    }
+    QByteArray method = request.getMethod();
+    bool hasId = !pathElements.id.isEmpty();
 
-    if(command.toLower() == "remove" || (command.isEmpty() && (request.getMethod() == "DELETE") && additionalElementCount == 1))
-    {
-        QVariant uuidVariant = parameters["uuid"];
-        if(!uuidVariant.isValid())
-        {
-            uuidVariant = pathElements.additionalElements[0];
-        }
-
-        QString uuid = uuidVariant.toString();
-        if(uuid.isEmpty())
-            invalidData(response, "No valid item uuid.");
-
-        int index = -1;
-        if(parameters.contains("index"))
-        {
-            bool ok;
-            int tmpIndex = parameters["index"].toInt(&ok);
-            if(ok)
-                index = tmpIndex;
-        }
-        ListResource::ModificationResult result = resource->removeItem(uuid, token, index);
-        handleError(result.error, response);
-    }
-
-    if(command.toLower() == "setproperty" || (command.isEmpty() && (request.getMethod() == "PATCH") && additionalElementCount == 1))
-    {
-        QVariant uuidVariant = parameters["uuid"];
-        if(!uuidVariant.isValid())
-        {
-            uuidVariant = pathElements.additionalElements[0];
-        }
-
-        QString uuid = uuidVariant.toString();
-        if(uuid.isEmpty())
-            invalidData(response, "No valid item uuid.");
-
-        int index = -1;
-        if(parameters.contains("index"))
-        {
-            bool ok;
-            int tmpIndex = parameters["index"].toInt(&ok);
-            if(ok)
-                index = tmpIndex;
-        }
-
-        if(request.getMethod() == "PATCH")
-        {
-            QVariant data = parameters["data"].toMap();
-            if(data.isValid())
-            {
-                QVariantMap dataMap = data.toMap();
-                QMapIterator<QString, QVariant> it(dataMap);
-                while(it.hasNext())
-                {
-                    it.next();
-                    ListResource::ModificationResult result = resource->setProperty(it.key(), it.value(), index, uuid, token);
-                    handleMofidicationResult(result, response, !it.hasNext());
-                }
+    // GET /lists/{resource} - get full list
+    // GET /lists/{resource}/{id} - get single item (id can be uuid or integer index)
+    if (method == "GET") {
+        if (hasId) {
+            int index; QString uuid;
+            resolveId(pathElements.id, index, uuid);
+            QVariant item = invokeOnOwnerThread(resource.data(), [&]() {
+                auto returnVal = proxy.getItem(index, identity, uuid);
+                resource.reset();
+                return returnVal;
+            });
+            if (!item.isValid()) {
+                notFound(response, "Item not found");
                 return;
             }
+            writeVariant(item, response);
+        } else {
+            QVariantList data = invokeOnOwnerThread(resource.data(), [&]() {
+                auto returnVal = proxy.getListData(identity);
+                resource.reset();
+                return returnVal;
+            });
+            QVariant v(data);
+            writeVariant(v, response);
         }
-        else
-        {
-            QString property = parameters["property"].toString();
-            QVariant data = parameters["property"];
-            if(property.isEmpty())
-                invalidData(response, "Invalid property.");
-            if(!data.isValid())
-                invalidData(response, "Invalid data.");
-
-            ListResource::ModificationResult result = resource->setProperty(property, data, index, uuid, token);
-            handleMofidicationResult(result, response);
-            return;
-        }
-    }
-
-    if(command.toLower() == "delete" || (command.isEmpty() && (request.getMethod() == "DELETE")))
-    {
-        ListResource::ModificationResult result = resource->deleteList(token);
-        handleError(result.error, response);
         return;
     }
+
+    // POST /lists/{resource} - append item
+    // POST /lists/{resource}?index={n} - insert at index
+    if (method == "POST") {
+        QVariant data = parameters["data"];
+        if (!data.isValid()) {
+            invalidData(response, "Missing 'data' field");
+            return;
+        }
+
+        QVariant indexVariant = parameters.value("index");
+        if (indexVariant.isValid()) {
+            bool ok;
+            int index = indexVariant.toInt(&ok);
+            if (!ok) {
+                invalidData(response, "Invalid index");
+                return;
+            }
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = proxy.insertAt(data, index, token);
+                resource.reset();
+                return result;
+            });
+            handleModificationResult(result, response);
+        } else {
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = proxy.appendItem(data, token);
+                resource.reset();
+                return result;
+            });
+            handleModificationResult(result, response);
+        }
+        return;
+    }
+
+    // PUT /lists/{resource}/{id} - replace item (id can be uuid or integer index)
+    if (method == "PUT") {
+        if (!hasId) {
+            invalidData(response, "Missing item identifier");
+            return;
+        }
+        QVariant data = parameters["data"];
+        if (!data.isValid()) {
+            invalidData(response, "Missing 'data' field");
+            return;
+        }
+        int index; QString uuid;
+        resolveId(pathElements.id, index, uuid);
+        ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+            auto returnVal = proxy.set(data, index, uuid, token);
+            resource.reset();
+            return returnVal;
+        });
+        handleModificationResult(result, response);
+        return;
+    }
+
+    // PATCH /lists/{resource}/{id} - update properties (id can be uuid or integer index)
+    if (method == "PATCH") {
+        if (!hasId) {
+            invalidData(response, "Missing item identifier");
+            return;
+        }
+        QVariant dataVariant = parameters["data"];
+        if (!dataVariant.isValid()) {
+            invalidData(response, "Missing 'data' field");
+            return;
+        }
+        QVariantMap dataMap = dataVariant.toMap();
+        if (dataMap.isEmpty()) {
+            invalidData(response, "Invalid data map");
+            return;
+        }
+        int index; QString uuid;
+        resolveId(pathElements.id, index, uuid);
+        ListResource::ModificationResult lastResult;
+        invokeOnOwnerThread(resource.data(), [&]() {
+            QMapIterator<QString, QVariant> it(dataMap);
+            while (it.hasNext()) {
+                it.next();
+                lastResult = proxy.setProperty(it.key(), it.value(), index, uuid, token);
+                if (lastResult.error != IResource::NO_ERROR)
+                    break;
+            }
+            resource.reset();
+            return true;
+        });
+        handleModificationResult(lastResult, response);
+        return;
+    }
+
+    // DELETE /lists/{resource}/{id} - remove item (id can be uuid or integer index)
+    // DELETE /lists/{resource} - delete entire list
+    if (method == "DELETE") {
+        if (hasId) {
+            int index; QString uuid;
+            resolveId(pathElements.id, index, uuid);
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = proxy.removeItem(uuid, token, index);
+                resource.reset();
+                return result;
+            });
+            handleModificationResult(result, response);
+        } else {
+            ListResource::ModificationResult result = invokeOnOwnerThread(resource.data(), [&]() {
+                auto result = proxy.deleteList(token);
+                resource.reset();
+                return result;
+            });
+            handleModificationResult(result, response);
+        }
+        return;
+    }
+
+    sendJsonError(response, 405, "Method not allowed");
 }

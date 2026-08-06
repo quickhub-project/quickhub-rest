@@ -23,15 +23,15 @@
 #include "Controller/ImageController.h"
 #include "Controller/FileController.h"
 #include "Controller/LoginController.h"
+#include "Controller/ServiceController.h"
 #include "staticfilecontroller.h"
 #include "httpsessionstore.h"
+#include "Server/Authentication/AuthentificationService.h"
 
-/** Controller for static files */
 extern StaticFileController* staticFileController;
-/** Storage for session cookies */
 extern HttpSessionStore* sessionStore;
 
-RequestMapper::RequestMapper(QObject* parent) :HttpRequestHandler(parent)
+RequestMapper::RequestMapper(QObject* parent) : HttpRequestHandler(parent)
 {
     connect(sessionStore, &HttpSessionStore::sessionExpired, this, &RequestMapper::sessionExpired);
 }
@@ -42,39 +42,40 @@ RequestMapper::~RequestMapper()
 
 void RequestMapper::service(HttpRequest& request, HttpResponse& response)
 {
-
     QString path = QString::fromLatin1(request.getPath());
-    QStringList tokens = path.split("/", QString::SkipEmptyParts);
+    QStringList tokens = path.split("/", Qt::SkipEmptyParts);
     QString firstElement = path;
-    if(tokens.count() > 0)
+    if (tokens.count() > 0)
         firstElement = tokens.first();
 
-    if(firstElement.toLower() == "login")
-    {
+    QString route = firstElement.toLower();
+
+    if (route == "login" || route == "logout") {
         LoginController().service(request, response);
         return;
     }
 
-    if(firstElement.toLower() == "lists")
-    {
+    if (route == "lists") {
         ListController().service(request, response);
         return;
     }
 
-    if(firstElement.toLower() =="objects")
-    {
+    if (route == "objects") {
         ObjectController().service(request, response);
         return;
     }
 
-//    if(firstElement.toLower() =="images")
-//    {
-//        ImageController().service(request, response);
-//        return;
-//    }
+    if (route == "images") {
+        ImageController().service(request, response);
+        return;
+    }
 
-    if(firstElement.toLower() =="files")
-    {
+    if (route == "services") {
+        ServiceController().service(request, response);
+        return;
+    }
+
+    if (route == "files") {
         FileController().service(request, response);
         return;
     }

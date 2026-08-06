@@ -19,90 +19,179 @@
 #include "ImageController.h"
 #include "Server/Resources/ImageResource/ImageResource.h"
 #include "Server/Resources/ResourceManager/ResourceManager.h"
-#include "Server/Authentication/AuthentificationService.h"
-#include "Server/Authentication/IUser.h"
 #include <QBuffer>
+#include <QMimeDatabase>
+#include <QImageWriter>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 ImageController::ImageController() : IResourceHttpController()
-{}
-
-
-void ImageController::handleResourceOperation(QString token, IResourceHttpController::PathElements &pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
 {
-    Q_UNUSED(parameters);
-    qDebug()<<pathElements.resource;
-    qDebug()<<pathElements.id;
-    qDebug()<<pathElements.path;
+}
 
+void ImageController::handleResourceOperation(QString token, PathElements &pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response)
+{
+    Q_UNUSED(parameters)
 
-    if (request.getParameter("upload") =="finish")
-    {
-        QTemporaryFile* file=request.getUploadedFile("file1");
-        QString filename = request.getParameter("file1");
-        if (file)
-        {
-            qDebug()<<pathElements.path;
-            resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.path, token);
-            QSharedPointer<ImageResource> imgResource = resource.objectCast<ImageResource>();
-            if(imgResource == nullptr)
-            {
-                invalidData(response, "Image not available");
-                return;
-            }
-            QImage image;
-            if(image.load(file,"JPG"))
-            {
-                qInfo()<<"JPEG received: "<< filename;
-                IResource::ModificationResult result = imgResource->insert(image, QVariant(), filename, token);
-                handleMofidicationResult(result, response);
-            }
-            else
-                invalidData(response,"Could not load image");
+    if (!pathElements.valid) {
+        invalidData(response, "Path incomplete");
+        return;
+    }
+
+    QByteArray method = request.getMethod();
+    bool hasId = !pathElements.id.isEmpty();
+
+    // POST /images/{resource} - upload image (multipart, key=file)
+    if (method == "POST") {
+        QTemporaryFile* file = request.getUploadedFile("file");
+        QString filename = request.getParameter("file");
+        if (!file) {
+            invalidData(response, "No file uploaded (use multipart key 'file')");
+            return;
         }
-        else
-        {
-            response.setStatus(500, "Something went wrong...");
-            response.write("Oohps, something went wrong..", true);
+
+        Err::CloudError err;
+        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
+        if (err != Err::NO_ERROR) {
+            if (err == Err::INVALID_TOKEN)
+                invalidToken(response);
+            else
+                sendJsonError(response, 500, "Could not access image resource");
+            return;
+        }
+
+        QSharedPointer<ImageResource> imgResource = resource.objectCast<ImageResource>();
+        if (!imgResource) {
+            sendJsonError(response, 500, "Resource is not an image collection");
+            return;
+        }
+
+        QImage image;
+        if (!image.load(file, nullptr)) {
+            invalidData(response, "Could not load image");
+            return;
+        }
+
+        IResource::ModificationResult result = invokeOnOwnerThread(imgResource.data(), [&]() {
+            auto returnVal =imgResource->insert(image, QVariant(), filename, token);
+            imgResource.reset();
+            return returnVal;
+        });
+        handleModificationResult(result, response);
+        return;
+    }
+
+    // GET /images/{resource} - list all image IDs and metadata
+    if (method == "GET" && !hasId) {
+        Err::CloudError err;
+        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
+        if (err != Err::NO_ERROR) {
+            if (err == Err::INVALID_TOKEN)
+                invalidToken(response);
+            else
+                sendJsonError(response, 500, "Could not access image resource");
+            return;
+        }
+
+        QSharedPointer<ImageResource> imgResource = resource.objectCast<ImageResource>();
+        if (!imgResource) {
+            sendJsonError(response, 500, "Resource is not an image collection");
+            return;
+        }
+
+        QStringList ids;
+        QVariantMap metadata;
+        invokeOnOwnerThread(imgResource.data(), [&]() {
+            ids = imgResource->getAllImageIds(token);
+            metadata = imgResource->getAllMetadata();
+            imgResource.reset();
+            return true;
+        });
+
+        QJsonObject result;
+        result["ids"] = QJsonArray::fromStringList(ids);
+        result["metadata"] = QJsonObject::fromVariantMap(metadata);
+        response.setStatus(200, "OK");
+        response.write(QJsonDocument(result).toJson(QJsonDocument::Compact), true);
+        return;
+    }
+
+    // GET /images/{resource}/{id} - get image (binary response)
+    if (method == "GET" && hasId) {
+        Err::CloudError err;
+        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
+        if (err != Err::NO_ERROR) {
+            if (err == Err::INVALID_TOKEN)
+                invalidToken(response);
+            else
+                sendJsonError(response, 500, "Could not access image resource");
+            return;
+        }
+
+        QSharedPointer<ImageResource> imgResource = resource.objectCast<ImageResource>();
+        if (!imgResource) {
+            sendJsonError(response, 500, "Resource is not an image collection");
+            return;
+        }
+
+        QImage img = invokeOnOwnerThread(imgResource.data(), [&]() {
+            auto returnVal = imgResource->getImage(pathElements.id, token);
+            imgResource.reset();
+            return returnVal;
+        });
+
+        if (img.isNull()) {
+            notFound(response, "Image not found");
+            return;
+        }
+
+        QMimeDatabase mimeDb;
+        QMimeType mimeType = mimeDb.mimeTypeForFile(pathElements.id, QMimeDatabase::MatchExtension);
+        QByteArray format = mimeType.preferredSuffix().toUpper().toUtf8();
+        if (format == "JPG")
+            format = "JPEG";
+        if (!QImageWriter::supportedImageFormats().contains(format.toLower()))
+            format = "PNG";
+
+        response.setHeader("Content-Type", mimeType.name().toUtf8());
+        QBuffer stream;
+        stream.open(QBuffer::ReadWrite);
+        img.save(&stream, format.constData());
+        stream.seek(0);
+        while (!stream.atEnd()) {
+            QByteArray buffer = stream.read(65536);
+            response.write(buffer);
         }
         return;
     }
 
-
-//    if(command == "upload")
-//    {
-//        response.setHeader("Content-Type", "text/html; charset=ISO-8859-1");
-//        response.write("<html><body>");
-//        response.write("Upload a JPEG image file<p>");
-//        response.write("<form method=\"post\" enctype=\"multipart/form-data\">");
-//        response.write("  <input type=\"hidden\" name=\"upload\" value=\"finish\">");
-//        response.write("  File: <input type=\"file\" name=\"file1\"><br>");
-//        response.write("  <input type=\"submit\">");
-//        response.write("</form>");
-//        response.write("</body></html>",true);
-//    }
-
-    resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource.replace(".","/"), token);
-    QSharedPointer<ImageResource> imgResource = resource.objectCast<ImageResource>();
-    if(imgResource  != nullptr)
-    {
-        QImage img = imgResource->getImage(pathElements.id, token);
-        if(!img.isNull())
-        {
-            response.setHeader("Content-Type", "image/jpeg");
-            QBuffer stream;
-            stream.open(QBuffer::ReadWrite);
-            img.save(&stream,"JPG");
-            stream.seek(0);
-            while (!stream.atEnd())
-            {
-                QByteArray buffer=stream.read(65536);
-                response.write(buffer);
-            }
+    // DELETE /images/{resource}/{id} - delete image
+    if (method == "DELETE" && hasId) {
+        Err::CloudError err;
+        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
+        if (err != Err::NO_ERROR) {
+            if (err == Err::INVALID_TOKEN)
+                invalidToken(response);
+            else
+                sendJsonError(response, 500, "Could not access image resource");
+            return;
         }
-    }
-    else
-    {
 
+        QSharedPointer<ImageResource> imgResource = resource.objectCast<ImageResource>();
+        if (!imgResource) {
+            sendJsonError(response, 500, "Resource is not an image collection");
+            return;
+        }
+
+        IResource::ModificationResult result = invokeOnOwnerThread(imgResource.data(), [&]() {
+            auto returnVal = imgResource->deleteImage(pathElements.id, token);
+            imgResource.reset();
+            return returnVal;
+        });
+        handleModificationResult(result, response);
+        return;
     }
+
+    sendJsonError(response, 405, "Method not allowed");
 }
-

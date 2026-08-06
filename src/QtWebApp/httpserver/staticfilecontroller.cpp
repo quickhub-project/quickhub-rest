@@ -33,7 +33,7 @@ StaticFileController::StaticFileController(QSettings* settings, QObject* parent)
     maxCachedFileSize=settings->value("maxCachedFileSize","65536").toInt();
     cache.setMaxCost(settings->value("cacheSize","1000000").toInt());
     cacheTimeout=settings->value("cacheTime","60000").toInt();
-    qDebug("StaticFileController: cache timeout=%i, size=%i",cacheTimeout,cache.maxCost());
+    qDebug("StaticFileController: cache timeout=%i, size=%lld",cacheTimeout,static_cast<long long>(cache.maxCost()));
 }
 
 
@@ -178,6 +178,10 @@ void StaticFileController::setContentType(QString fileName, HttpResponse& respon
     else if (fileName.endsWith(".otf"))
     {
         response.setHeader("Content-Type", "application/font-otf");
+    }
+    else if (fileName.endsWith(".wasm"))
+    {
+        response.setHeader("Content-Type", "application/wasm");
     }
     // Todo: add all of your content types
     else
