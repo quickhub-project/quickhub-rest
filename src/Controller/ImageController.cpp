@@ -51,13 +51,8 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
             return;
         }
 
-        Err::CloudError err;
-        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
-        if (err != Err::NO_ERROR) {
-            if (err == Err::INVALID_TOKEN)
-                invalidToken(response);
-            else
-                sendJsonError(response, 500, "Could not access image resource");
+        resourcePtr resource = getResource(pathElements.resource, "imgcoll", token, response);
+        if (resource.isNull()) {
             return;
         }
 
@@ -84,13 +79,8 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
 
     // GET /images/{resource} - list all image IDs and metadata
     if (method == "GET" && !hasId) {
-        Err::CloudError err;
-        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
-        if (err != Err::NO_ERROR) {
-            if (err == Err::INVALID_TOKEN)
-                invalidToken(response);
-            else
-                sendJsonError(response, 500, "Could not access image resource");
+        resourcePtr resource = getResource(pathElements.resource, "imgcoll", token, response);
+        if (resource.isNull()) {
             return;
         }
 
@@ -119,13 +109,8 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
 
     // GET /images/{resource}/{id} - get image (binary response)
     if (method == "GET" && hasId) {
-        Err::CloudError err;
-        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
-        if (err != Err::NO_ERROR) {
-            if (err == Err::INVALID_TOKEN)
-                invalidToken(response);
-            else
-                sendJsonError(response, 500, "Could not access image resource");
+        resourcePtr resource = getResource(pathElements.resource, "imgcoll", token, response);
+        if (resource.isNull()) {
             return;
         }
 
@@ -168,13 +153,8 @@ void ImageController::handleResourceOperation(QString token, PathElements &pathE
 
     // DELETE /images/{resource}/{id} - delete image
     if (method == "DELETE" && hasId) {
-        Err::CloudError err;
-        resourcePtr resource = ResourceManager::instance()->getOrCreateResource("imgcoll", pathElements.resource, token, &err);
-        if (err != Err::NO_ERROR) {
-            if (err == Err::INVALID_TOKEN)
-                invalidToken(response);
-            else
-                sendJsonError(response, 500, "Could not access image resource");
+        resourcePtr resource = getResource(pathElements.resource, "imgcoll", token, response);
+        if (resource.isNull()) {
             return;
         }
 
