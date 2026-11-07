@@ -60,6 +60,17 @@ void ListController::handleResourceOperation(QString token, PathElements& pathEl
     // GET /lists/{resource} - get full list
     // GET /lists/{resource}/{id} - get single item (id can be uuid or integer index)
     if (method == "GET") {
+        // The factory only checks read permissions when it instantiates the resource.
+        // Requests that are served from the ResourceManager's cache bypass that check,
+        // so the resource has to be asked again for every single read.
+        bool permitted = invokeOnOwnerThread(resource.data(), [&]() {
+            return proxy.isPermittedToRead(identity);
+        });
+        if (!permitted) {
+            permissionDenied(response);
+            return;
+        }
+
         if (hasId) {
             int index; QString uuid;
             resolveId(pathElements.id, index, uuid);

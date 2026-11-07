@@ -221,7 +221,13 @@ resourcePtr IResourceHttpController::getResource(const QString& path, const QStr
 
     if (error == Err::NO_ERROR)
     {
-        return resource;
+        if (!resource.isNull())
+            return resource;
+
+        // Don't let a null resource pass as success - the caller would return without
+        // writing anything and the server would answer with an empty 200.
+        notFound(response, "Resource not available");
+        return resourcePtr();
     }
 
     if (error == Err::INVALID_TOKEN)

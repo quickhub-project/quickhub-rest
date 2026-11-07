@@ -46,6 +46,17 @@ void ObjectController::handleResourceOperation(QString token, PathElements& path
     // GET /objects/{resource} - get full object
     // GET /objects/{resource}/{property} - get single property
     if (method == "GET") {
+        // The factory only checks read permissions when it instantiates the resource.
+        // Requests that are served from the ResourceManager's cache bypass that check,
+        // so the resource has to be asked again for every single read.
+        bool permitted = invokeOnOwnerThread(resource.data(), [&]() {
+            return proxy.isPermittedToRead(identity);
+        });
+        if (!permitted) {
+            permissionDenied(response);
+            return;
+        }
+
         if (hasProperty) {
             QString property = pathElements.id;
             QVariantMap objData = invokeOnOwnerThread(resource.data(), [&]() {
