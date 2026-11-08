@@ -49,8 +49,7 @@ void LoginController::service(HttpRequest &request, HttpResponse &response)
             token = session.get("token").toString();
 
         if (!token.isEmpty()) {
-            // logout() is neither a slot nor Q_INVOKABLE - the string based
-            // QMetaObject::invokeMethod() never found it and silently did nothing.
+            // logout() is neither a slot nor Q_INVOKABLE, so it can't be called by name
             auto authController = AuthenticationService::instance();
             IResourceHttpController::invokeOnOwnerThread(authController, [&](){ return authController->logout(token); });
             session.remove("token");
