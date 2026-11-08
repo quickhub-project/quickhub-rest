@@ -31,22 +31,14 @@ HttpSessionStore* sessionStore;
 StaticFileController* staticFileController;
 HttpServer::HttpServer(QString storagePath, QObject *parent) : QObject(parent)
 {
-    QSettings* listenerSettings;
+    QSettings* listenerSettings = nullptr;
 
     QString configFile = storagePath+"/httpServer/httpConfig.ini";
-    if( false)
-    {
-        listenerSettings=new QSettings(configFile, QSettings::IniFormat);
-        listenerSettings->beginGroup("listener");
-    }
-    else
-    {
-        qDebug()<<"Settings file not found. Use default Settings.";
-        listenerSettings = new QSettings();
-        listenerSettings->beginGroup("listener");
-        listenerSettings->setValue("port", 8080);
-        listenerSettings->setValue("maxMultiPartSize", 120000000);
-    }
+
+    listenerSettings = new QSettings();
+    listenerSettings->beginGroup("listener");
+    listenerSettings->setValue("port", 8080);
+    listenerSettings->setValue("maxMultiPartSize", 120000000);
 
     QSettings fileSettings;
 
@@ -65,6 +57,6 @@ HttpServer::HttpServer(QString storagePath, QObject *parent) : QObject(parent)
     sessionStore=new HttpSessionStore(sessionSettings, this);
 
     fileSettings.setValue("path",docrootPath);
-    staticFileController= new StaticFileController(&fileSettings, this);
+    staticFileController = new StaticFileController(&fileSettings, this);
     new HttpListener(listenerSettings, new RequestMapper(this),this);
 }

@@ -20,12 +20,6 @@
 #ifndef OBJECTCONTROLLER_H
 #define OBJECTCONTROLLER_H
 
-#include "httprequesthandler.h"
-#include <QObject>
-#include "Server/Resources/ResourceManager/ResourceManager.h"
-#include "Server/Resources/ObjectResource/ObjectResource.h"
-#include "Server/Authentication/AuthentificationService.h"
-#include "Server/Authentication/User.h"
 #include "IResourceHttpController.h"
 
 using namespace stefanfrings;
@@ -35,12 +29,8 @@ class ObjectController : public IResourceHttpController
     Q_DISABLE_COPY(ObjectController)
 
 public:
-    /** Constructor */
     ObjectController();
-    ~ObjectController(){}
-    void handleResourceOperation(QString token, PathElements& pathElements, QString command, QVariantMap parameters, HttpRequest &request, HttpResponse &response);
-
-
+    void handleResourceOperation(QString token, PathElements& pathElements, QVariantMap parameters, HttpRequest &request, HttpResponse &response) override;
 };
 
 #endif // OBJECTCONTROLLER_H

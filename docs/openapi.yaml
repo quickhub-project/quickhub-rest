@@ -1,0 +1,885 @@
+openapi: 3.0.3
+info:
+  title: QuickHub REST API
+  description: |
+    REST API for the QuickHub framework. Provides access to synchronized lists,
+    key/value objects, services (RPC), image collections, and file uploads.
+
+    ## Authentication
+
+    All endpoints (except `/login`) require authentication. The token can be provided in three ways (checked in this order):
+
+    1. **Authorization Header** (preferred): `Authorization: Bearer <token>`
+    2. **Session Cookie**: Automatically set after `/login`
+    3. **Query Parameter**: `?token=<token>` (useful for `<img>` / `<video>` embeds)
+
+    ## Resource Paths
+
+    Resource names use dots as namespace separators in the URL. Dots are internally
+    converted to `/` for the resource path. Example: `/lists/my.resource.name` resolves
+    to the internal resource path `my/resource/name`.
+
+    ## Error Responses
+
+    All errors are returned as JSON:
+    ```json
+    {"error": true, "code": 400, "message": "Description of the error"}
+    ```
+  version: 1.0.0
+  license:
+    name: GPL-3.0
+    url: https://www.gnu.org/licenses/gpl-3.0.html
+  contact:
+    name: Friedemann Metzger
+    url: https://www.quickhub.org
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+tags:
+  - name: Auth
+    description: Authentication (login/logout)
+  - name: Lists
+    description: Synchronized list resources
+  - name: Objects
+    description: Synchronized key/value object resources
+  - name: Services
+    description: Remote Procedure Calls (RPC)
+  - name: Images
+    description: Image collection resources
+  - name: Files
+    description: General-purpose file upload and download
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Session token obtained via `/login`
+    TokenQuery:
+      type: apiKey
+      in: query
+      name: token
+      description: Token as query parameter (fallback for `<img>` embeds)
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: boolean
+          example: true
+        code:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: "Invalid data / Insufficient arguments"
+      required: [error, code, message]
+
+    LoginRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          example: "admin"
+        pass:
+          type: string
+          example: "secret"
+      required: [user, pass]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      required: [token]
+
+    LogoutResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+
+    SuccessResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          example: false
+        data:
+          description: Optional result data
+      required: [error]
+
+    ListItem:
+      type: object
+      description: A single list item (structure depends on the resource)
+      additionalProperties: true
+
+    ListData:
+      type: object
+      properties:
+        data:
+          description: The item data to store
+      required: [data]
+
+    ObjectData:
+      type: object
+      description: Key/value object (structure depends on the resource)
+      additionalProperties: true
+
+    PropertyData:
+      type: object
+      properties:
+        data:
+          description: The property value to set
+      required: [data]
+
+    PatchData:
+      type: object
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+          description: Key/value pairs to update
+      required: [data]
+
+    ServiceInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "deviceService"
+        methods:
+          type: array
+          items:
+            type: string
+          example: ["getDevices", "triggerFunction"]
+      required: [name, methods]
+
+    ImageList:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+          example: ["abc123", "def456"]
+        metadata:
+          type: object
+          additionalProperties: true
+
+    FileUploadResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        filename:
+          type: string
+          example: "document.pdf"
+        mimeType:
+          type: string
+          example: "application/pdf"
+        url:
+          type: string
+          example: "/files/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      required: [id, filename, mimeType, url]
+
+  responses:
+    InvalidToken:
+      description: Invalid or missing authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: true
+            code: 403
+            message: "Invalid token. Please log in and try again."
+    PermissionDenied:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: true
+            code: 403
+            message: "Permission denied"
+    NotFound:
+      description: Resource or item not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: true
+            code: 404
+            message: "Not found: Unknown item"
+    BadRequest:
+      description: Invalid request data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: true
+            code: 400
+            message: "Invalid data / Insufficient arguments"
+    MethodNotAllowed:
+      description: HTTP method not supported for this endpoint
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: true
+            code: 405
+            message: "Method not allowed"
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ── Auth ──────────────────────────────────────────────────────────────
+  /login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: |
+        Authenticate with username and password. Returns a session token.
+        Credentials can be provided as JSON body or as query parameters.
+        If a valid session already exists, the existing token is returned.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Missing credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: true
+                code: 400
+                message: "Missing credentials"
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: true
+                code: 401
+                message: "Incorrect password"
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: true
+                code: 403
+                message: "Permission denied"
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      description: Invalidate the current session token.
+      security: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+
+  # ── Lists ─────────────────────────────────────────────────────────────
+  /lists/{resource}:
+    parameters:
+      - name: resource
+        in: path
+        required: true
+        description: Resource name (dots are converted to `/` internally)
+        schema:
+          type: string
+        example: "my.resource.name"
+
+    get:
+      tags: [Lists]
+      summary: Get entire list
+      description: Returns all items in the synchronized list.
+      responses:
+        '200':
+          description: List data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ListItem'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    post:
+      tags: [Lists]
+      summary: Append or insert item
+      description: |
+        Appends an item to the end of the list. If the `index` parameter
+        is provided (in body or query), the item is inserted at that position instead.
+      parameters:
+        - name: index
+          in: query
+          required: false
+          description: Insert position (0-based). If omitted, item is appended.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListData'
+            example:
+              data:
+                name: "New Item"
+                value: 42
+      responses:
+        '200':
+          description: Item added successfully
+          content:
+            application/json:
+              schema:
+                description: Modification result data
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    delete:
+      tags: [Lists]
+      summary: Delete entire list
+      description: Deletes the entire list and all its items.
+      responses:
+        '200':
+          description: List deleted
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  /lists/{resource}/{uuid}:
+    parameters:
+      - name: resource
+        in: path
+        required: true
+        description: Resource name
+        schema:
+          type: string
+      - name: uuid
+        in: path
+        required: true
+        description: UUID of the list item
+        schema:
+          type: string
+
+    get:
+      tags: [Lists]
+      summary: Get single item
+      description: Returns a single item by its UUID.
+      responses:
+        '200':
+          description: Item data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListItem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    put:
+      tags: [Lists]
+      summary: Replace item
+      description: Replaces the entire item data for the given UUID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListData'
+      responses:
+        '200':
+          description: Item replaced
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    patch:
+      tags: [Lists]
+      summary: Update item properties
+      description: |
+        Updates individual properties of an item. Only the provided
+        keys are modified; other properties remain unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchData'
+            example:
+              data:
+                name: "Updated Name"
+                status: "active"
+      responses:
+        '200':
+          description: Properties updated
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    delete:
+      tags: [Lists]
+      summary: Remove item
+      description: Removes a single item from the list by its UUID.
+      responses:
+        '200':
+          description: Item removed
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  # ── Objects ───────────────────────────────────────────────────────────
+  /objects/{resource}:
+    parameters:
+      - name: resource
+        in: path
+        required: true
+        description: Resource name (dots are converted to `/` internally)
+        schema:
+          type: string
+
+    get:
+      tags: [Objects]
+      summary: Get full object
+      description: Returns all key/value pairs of the synchronized object.
+      responses:
+        '200':
+          description: Object data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectData'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    patch:
+      tags: [Objects]
+      summary: Set multiple properties
+      description: Updates multiple properties of the object at once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchData'
+            example:
+              data:
+                name: "Updated"
+                enabled: true
+      responses:
+        '200':
+          description: Properties updated
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  /objects/{resource}/{property}:
+    parameters:
+      - name: resource
+        in: path
+        required: true
+        description: Resource name
+        schema:
+          type: string
+      - name: property
+        in: path
+        required: true
+        description: Property name
+        schema:
+          type: string
+
+    get:
+      tags: [Objects]
+      summary: Get single property
+      description: Returns the value of a single property.
+      responses:
+        '200':
+          description: Property value
+          content:
+            application/json:
+              schema:
+                description: The property value (type depends on the resource)
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    put:
+      tags: [Objects]
+      summary: Set single property
+      description: Sets the value of a single property.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyData'
+            example:
+              data: "new value"
+      responses:
+        '200':
+          description: Property set
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  # ── Services (RPC) ───────────────────────────────────────────────────
+  /services:
+    get:
+      tags: [Services]
+      summary: List all services
+      description: Returns a list of all registered services and their available methods.
+      responses:
+        '200':
+          description: List of services
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceInfo'
+
+  /services/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: Service name
+        schema:
+          type: string
+        example: "deviceService"
+
+    get:
+      tags: [Services]
+      summary: Get service info
+      description: Returns information about a specific service, including its available methods.
+      responses:
+        '200':
+          description: Service info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /services/{name}/{method}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: Service name
+        schema:
+          type: string
+      - name: method
+        in: path
+        required: true
+        description: Method name to call
+        schema:
+          type: string
+
+    post:
+      tags: [Services]
+      summary: Call service method
+      description: |
+        Invokes an RPC method on the specified service. The request body
+        is passed as arguments to the service method.
+
+        The call is internally asynchronous but the REST endpoint waits
+        synchronously for the response (timeout: 30 seconds).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Arguments for the service method
+            example:
+              deviceId: "my-device-001"
+              action: "restart"
+      responses:
+        '200':
+          description: Method result
+          content:
+            application/json:
+              schema:
+                description: Return value of the service method (structure depends on the service)
+        '404':
+          description: Service or method not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Service call timed out (30s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: true
+                code: 504
+                message: "Service call timed out"
+
+  # ── Images ────────────────────────────────────────────────────────────
+  /images/{resource}:
+    parameters:
+      - name: resource
+        in: path
+        required: true
+        description: Image collection resource name
+        schema:
+          type: string
+
+    get:
+      tags: [Images]
+      summary: List all images
+      description: Returns all image IDs and metadata for the collection.
+      responses:
+        '200':
+          description: Image IDs and metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImageList'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    post:
+      tags: [Images]
+      summary: Upload image
+      description: |
+        Uploads an image to the collection. The image must be sent as
+        multipart form data with the key `file`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Image file to upload
+              required: [file]
+      responses:
+        '200':
+          description: Image uploaded
+          content:
+            application/json:
+              schema:
+                description: Modification result with image ID
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  /images/{resource}/{id}:
+    parameters:
+      - name: resource
+        in: path
+        required: true
+        description: Image collection resource name
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Image ID
+        schema:
+          type: string
+
+    get:
+      tags: [Images]
+      summary: Get image
+      description: |
+        Returns the image as binary data (Content-Type: `image/png`).
+        Supports token as query parameter for use in `<img>` tags.
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: Auth token (alternative to Bearer header, for `<img>` embeds)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Image binary data
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    delete:
+      tags: [Images]
+      summary: Delete image
+      description: Deletes an image from the collection.
+      responses:
+        '200':
+          description: Image deleted
+          content:
+            application/json:
+              schema:
+                description: Modification result
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  # ── Files ─────────────────────────────────────────────────────────────
+  /files:
+    post:
+      tags: [Files]
+      summary: Upload file
+      description: |
+        Uploads a file to persistent storage. The file must be sent as
+        multipart form data with the key `file`. Files are stored with a
+        UUID-based filename; the original filename and MIME type are preserved
+        in metadata.
+
+        The upload directory is configurable via the `FILE_UPLOAD_DIR` environment variable.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: File to upload
+              required: [file]
+      responses:
+        '201':
+          description: File uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+  /files/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: File ID (UUID)
+        schema:
+          type: string
+
+    get:
+      tags: [Files]
+      summary: Download file
+      description: |
+        Returns the file with the correct Content-Type header.
+        Supports token as query parameter for use in HTML embeds.
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: Auth token (alternative to Bearer header)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: File binary data
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
+
+    delete:
+      tags: [Files]
+      summary: Delete file
+      description: Deletes the file and its metadata from storage.
+      responses:
+        '200':
+          description: File deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/InvalidToken'
