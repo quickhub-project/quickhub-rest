@@ -40,10 +40,19 @@ void LoginController::service(HttpRequest &request, HttpResponse &response)
     // POST /logout
     QString path = QString::fromLatin1(request.getPath());
     if (path.contains("logout", Qt::CaseInsensitive)) {
-        QString token = session.get("token").toString();
+        // Clients may authenticate via bearer token instead of the session cookie
+        QString token;
+        QString authHeader = QString::fromLatin1(request.getHeader("Authorization"));
+        if (authHeader.startsWith("Bearer ", Qt::CaseInsensitive))
+            token = authHeader.mid(7).trimmed();
+        if (token.isEmpty())
+            token = session.get("token").toString();
+
         if (!token.isEmpty()) {
-            QMetaObject::invokeMethod(AuthenticationService::instance(), "logout", Qt::QueuedConnection,
-                                      Q_ARG(QString, token));
+            // logout() is neither a slot nor Q_INVOKABLE - the string based
+            // QMetaObject::invokeMethod() never found it and silently did nothing.
+            auto authController = AuthenticationService::instance();
+            IResourceHttpController::invokeOnOwnerThread(authController, [&](){ return authController->logout(token); });
             session.remove("token");
         }
         QJsonObject obj;
